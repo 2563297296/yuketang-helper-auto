@@ -61,7 +61,6 @@ function installStyles() {
     .ykt-mobile-reminder-number input { width: 72px; border: 1px solid #c6d7ec; border-radius: 8px; padding: 7px; font-size: 14px; }
     .ykt-mobile-reminder-actions { display: flex; gap: 8px; margin-top: 14px; }
     .ykt-mobile-reminder-actions button { flex: 1; min-height: 42px; border-radius: 10px; font-size: 14px; font-weight: 650; }
-    #ykt-mobile-reminder-test { border: 1px solid #9abbe5; background: #fff; color: #155eaf; }
     #ykt-mobile-reminder-close-sheet { border: 0; background: #1368d5; color: #fff; }
     #ykt-mobile-reminder-status { min-height: 18px; margin: 8px 2px 0; color: #64778c; font-size: 11px; }
     @media (prefers-reduced-motion: reduce) {
@@ -124,7 +123,6 @@ export function mountMobileReminderPanel() {
         </label>
       </div>
       <div class="ykt-mobile-reminder-actions">
-        <button id="ykt-mobile-reminder-test" type="button">测试当前提醒方式</button>
         <button id="ykt-mobile-reminder-close-sheet" type="button">完成</button>
       </div>
       <div id="ykt-mobile-reminder-status" role="status"></div>
@@ -135,7 +133,6 @@ export function mountMobileReminderPanel() {
   const $sheet = root.querySelector('#ykt-mobile-reminder-sheet');
   const $close = root.querySelector('.ykt-mobile-reminder-close');
   const $closeSheet = root.querySelector('#ykt-mobile-reminder-close-sheet');
-  const $test = root.querySelector('#ykt-mobile-reminder-test');
   const $status = root.querySelector('#ykt-mobile-reminder-status');
   const $duration = root.querySelector('#ykt-mobile-reminder-duration');
   const $volume = root.querySelector('#ykt-mobile-reminder-volume');
@@ -187,14 +184,6 @@ export function mountMobileReminderPanel() {
   $close.addEventListener('click', () => setOpen(false));
   $closeSheet.addEventListener('click', () => setOpen(false));
   $sheet.addEventListener('change', () => { void save(); });
-  $test.addEventListener('click', () => {
-    ui.notifyProblem({
-      problemId: 'MOBILE-REMINDER-TEST',
-      body: '【测试提醒】当前已按所选提醒方式发送。',
-      options: [],
-    }, null, { title: '课堂提醒测试', nativeTitle: '课堂提醒测试' });
-  });
-
   sync();
   mounted = true;
   return root;
