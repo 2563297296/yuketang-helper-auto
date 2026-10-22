@@ -64,10 +64,11 @@ function xhrPost(url, data, headers) {
  * @param {{headers?:Record<string,string>, dt?:number}} [options]
  */
 export async function answerProblem(problem, result, options = {}) {
+  const pid = problem?.problemId ?? problem?.id;
   const url = '/api/v3/lesson/problem/answer';
   const headers = { ...DEFAULT_HEADERS(), ...(options.headers || {}) };
   const payload = {
-    problemId: problem.problemId,
+    problemId: pid,
     problemType: problem.problemType,
     dt: options.dt ?? Date.now(),
     result,
@@ -87,11 +88,12 @@ export async function answerProblem(problem, result, options = {}) {
  * @param {{headers?:Record<string,string>}} [options]
  */
 export async function retryAnswer(problem, result, dt, options = {}) {
+  const pid = problem?.problemId ?? problem?.id;
   const url = '/api/v3/lesson/problem/retry';
   const headers = { ...DEFAULT_HEADERS(), ...(options.headers || {}) };
   const payload = {
     problems: [{
-      problemId: problem.problemId,
+      problemId: pid,
       problemType: problem.problemType,
       dt,
       result,
@@ -103,7 +105,7 @@ export async function retryAnswer(problem, result, dt, options = {}) {
     throw new Error(`${resp.msg} (${resp.code})`);
   }
   const okList = resp?.data?.success || [];
-  if (!Array.isArray(okList) || !okList.includes(problem.problemId)) {
+  if (!Array.isArray(okList) || !okList.some(id => String(id) === String(pid))) {
     throw new Error('服务器未返回成功信息');
   }
   return resp;
@@ -127,6 +129,7 @@ export async function retryAnswer(problem, result, dt, options = {}) {
  * @param {number} [submitOptions.waitMs]          - 覆盖自动等待时间；未提供时按设置计算
  */
 export async function submitAnswer(problem, result, submitOptions = {}) {
+  const pid = problem?.problemId ?? problem?.id;
   const startTime = submitOptions?.startTime;
   const endTime = submitOptions?.endTime;
   const forceRetry = submitOptions?.forceRetry ?? false;
@@ -152,12 +155,12 @@ export async function submitAnswer(problem, result, submitOptions = {}) {
   if (pastDeadline || forceRetry) {
 
     console.group('[雨课堂助手][DEBUG][answer] >>> 进入补交分支判断');
-    console.log('problemId:', problem.problemId);
+    console.log('problemId:', pid);
     console.log('pastDeadline:', pastDeadline, '(now=', now, ', endTime=', endTime, ')');
     console.log('forceRetry:', forceRetry);
     console.log('传入 startTime:', startTime, '传入 endTime:', endTime);
 
-    const ps = repo?.problemStatus?.get?.(problem.problemId);
+    const ps = repo?.getProblemStatus?.(pid);
     console.log('从 repo.problemStatus 获取:', ps);
 
     const st = Number.isFinite(startTime) ? startTime : (ps?.startTime);
@@ -184,7 +187,7 @@ export async function submitAnswer(problem, result, submitOptions = {}) {
 
     try {
       const resp = await retryAnswer(problem, result, dt, { headers });
-      console.log('[雨课堂助手][INFO][answer] 补交成功 (/retry)', { problemId: problem.problemId, dt, pastDeadline, forceRetry });
+      console.log('[雨课堂助手][INFO][answer] 补交成功 (/retry)', { problemId: pid, dt, pastDeadline, forceRetry });
       return { route: 'retry', resp };
     } catch (e) {
       console.error('[雨课堂助手][ERR][answer] 补交失败 (/retry)：', e);

@@ -21,6 +21,8 @@ function mapProblemTypeToQuestionType(problemType) {
   }
 }
 
+const MOONSHOT_CHAT_HOSTS = new Set(['api.moonshot.cn', 'api.moonshot.ai']);
+
 function getActiveProfile(aiCfg) {
   const cfg = aiCfg || {};
   const profiles = Array.isArray(cfg.profiles) ? cfg.profiles : [];
@@ -32,8 +34,8 @@ function getActiveProfile(aiCfg) {
       name: 'Kimi Legacy',
       baseUrl: 'https://api.moonshot.cn/v1/chat/completions',
       apiKey: legacyKey,
-      model: 'moonshot-v1-8k',
-      visionModel: 'moonshot-v1-8k-vision-preview',
+      model: 'kimi-k3',
+      visionModel: 'kimi-k3',
     };
   }
   const activeId = cfg.activeProfileId;
@@ -43,10 +45,60 @@ function getActiveProfile(aiCfg) {
   return p;
 }
 
-function makeChatUrl(profile) {
-//   const base = (profile.baseUrl || 'https://api.moonshot.cn').replace(/\/+$/,'');
-//   return `${base}/v1/chat/completions`;   
-    return profile.baseUrl;
+export function makeChatUrl(profile) {
+  const rawUrl = String(profile?.baseUrl || '').trim();
+  if (!rawUrl) {
+    throw new Error('请先在设置中填写 AI 接口 URL');
+  }
+
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error('AI 接口 URL 格式无效，请填写完整的 http(s) 地址');
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('AI 接口 URL 必须使用 http 或 https');
+  }
+
+  // Kimi 的 Chat Completions 接口地址是 /v1/chat/completions。
+  // 兼容误填 /v1、/v1/responses，或漏写接口路径的情况。
+  if (MOONSHOT_CHAT_HOSTS.has(url.hostname.toLowerCase())) {
+    const path = url.pathname.replace(/\/+$/, '') || '/';
+    if (path === '/' || path === '/v1' || /^\/v1\/responses?$/i.test(path)) {
+      url.pathname = '/v1/chat/completions';
+    } else if (path === '/v1/chat/completions') {
+      url.pathname = path;
+    }
+  }
+
+  return url.toString();
+}
+
+export function assertValidChatPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('AI 请求体无效，已阻止发送');
+  }
+  if (!Array.isArray(payload.messages) || payload.messages.length === 0) {
+    throw new Error('AI 请求体 messages 为空，已阻止发送');
+  }
+
+  payload.messages.forEach((message, index) => {
+    if (!message || typeof message !== 'object') {
+      throw new Error(`AI 请求体第 ${index + 1} 条消息无效，已阻止发送`);
+    }
+    if (typeof message.role !== 'string' || !message.role.trim()) {
+      throw new Error(`AI 请求体第 ${index + 1} 条消息缺少 role，已阻止发送`);
+    }
+    const hasText = typeof message.content === 'string' && message.content.trim();
+    const hasParts = Array.isArray(message.content) && message.content.length > 0;
+    if (!hasText && !hasParts) {
+      throw new Error(`AI 请求体第 ${index + 1} 条消息内容为空，已阻止发送`);
+    }
+  });
+
+  return payload;
 }
 
 function withProfileTemperature(profile, payload) {
@@ -102,6 +154,25 @@ export async function queryAI(question, aiCfg) {
 
   const url = makeChatUrl(profile);
   const model = profile.model || 'gpt-4o-mini'; // 默认给一个合理值
+  const payload = assertValidChatPayload(withProfileTemperature(profile, {
+    model,
+    messages: [
+      { role: 'system', content: BASE_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: [
+              '【文本模式说明】可能为题目文本，也可能为普通问答。请先执行决策闸，再回答。',
+              '【用户输入（优先级最高）】',
+              question || '（无）',
+            ].join('\n'),
+          },
+        ],
+      },
+    ],
+  }));
 
   return new Promise((resolve, reject) => {
     gm.xhr({
@@ -111,25 +182,7 @@ export async function queryAI(question, aiCfg) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${profile.apiKey}`,
       },
-      data: JSON.stringify(withProfileTemperature(profile, {
-        model,
-        messages: [
-          { role: 'system', content: BASE_SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: [
-                  '【文本模式说明】可能为题目文本，也可能为普通问答。请先执行决策闸，再回答。',
-                  '【用户输入（优先级最高）】',
-                  question || '（无）',
-                ].join('\n'),
-              },
-            ],
-          },
-        ],
-      })),
+      data: JSON.stringify(payload),
       onload: (res) => {
         try {
           console.log('[雨课堂助手][AI OpenAI] Status:', res.status);
@@ -156,6 +209,7 @@ export async function queryAI(question, aiCfg) {
 // 通用 OpenAI 协议聊天请求封装（用于 Vision 两步调用）
 function chatCompletion(profile, payload, debugLabel = '[AI OpenAI]', timeoutMs = 60000) {
   const url = makeChatUrl(profile);
+  const requestPayload = assertValidChatPayload(withProfileTemperature(profile, payload));
 
   return new Promise((resolve, reject) => {
     gm.xhr({
@@ -165,7 +219,7 @@ function chatCompletion(profile, payload, debugLabel = '[AI OpenAI]', timeoutMs 
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${profile.apiKey}`,
       },
-      data: JSON.stringify(withProfileTemperature(profile, payload)),
+      data: JSON.stringify(requestPayload),
       timeout: timeoutMs,
       onload: (res) => {
         try {

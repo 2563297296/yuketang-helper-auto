@@ -9,7 +9,14 @@ const ENTITY_KEYS = [
   'quiz', 'exam', 'test', 'exercise', 'paper', 'problemGroup', 'problem_group',
   'problem', 'presentation', 'courseware', 'activity',
 ];
-const NESTED_PAYLOAD_KEYS = ['data', 'payload', 'result', 'content'];
+const NESTED_VALUE_KEYS = ['problem', 'data', 'payload', 'result', 'content'];
+const ASSESSMENT_GROUP_KEYS = [
+  'quiz', 'exam', 'test', 'exercise', 'paper',
+  'problemGroup', 'problem_group', 'problemgroup',
+];
+const CONCRETE_PROBLEM_ID_KEYS = [
+  'problemid', 'problemId', 'problem_id', 'prob',
+];
 
 // 保留导出，避免其他脚本依赖旧名称；真实配置集中在 reminder-preferences。
 export const PUBLISH_REMINDER_DEFAULTS = {
@@ -44,7 +51,7 @@ function getEntity(message) {
       if (entity && typeof entity === 'object') return entity;
     }
 
-    for (const key of NESTED_PAYLOAD_KEYS) {
+    for (const key of NESTED_VALUE_KEYS) {
       const nested = current[key];
       if (nested && typeof nested === 'object') {
         fallback = nested;
@@ -66,6 +73,113 @@ function firstText(source, keys) {
   return '';
 }
 
+function findNestedValue(source, keys) {
+  const queue = [source];
+  const visited = new Set();
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object' || visited.has(current)) continue;
+    visited.add(current);
+
+    for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(current, key)) continue;
+      const value = current[key];
+      if (value !== undefined && value !== null) return value;
+    }
+
+    for (const key of NESTED_VALUE_KEYS) {
+      const nested = current[key];
+      if (Array.isArray(nested)) queue.push(...nested);
+      else if (nested && typeof nested === 'object') queue.push(nested);
+    }
+  }
+
+  return undefined;
+}
+
+function hasAssessmentGroup(message) {
+  const group = findNestedValue(message, ASSESSMENT_GROUP_KEYS);
+  return group !== undefined && group !== null;
+}
+
+function findProblemValue(message, keys) {
+  const problem = findNestedValue(message, ['problem']);
+  if (problem && typeof problem === 'object') {
+    const value = findNestedValue(problem, keys);
+    if (value !== undefined) return value;
+  }
+  return findNestedValue(message, keys);
+}
+
+function scalarString(value) {
+  if (value == null || typeof value === 'object') return null;
+  const text = String(value).trim();
+  return text || null;
+}
+
+function getConcreteProblemId(message) {
+  const problem = findNestedValue(message, ['problem']);
+  if (problem && typeof problem === 'object') {
+    const id = firstText(problem, [
+      'problemId', 'problem_id', 'problemid', 'id', 'uuid',
+    ]);
+    if (id) return id;
+  }
+
+  const explicitId = findNestedValue(message, CONCRETE_PROBLEM_ID_KEYS);
+  if (
+    explicitId !== undefined &&
+    explicitId !== null &&
+    typeof explicitId !== 'object'
+  ) {
+    const id = String(explicitId).trim();
+    if (id) return id;
+  }
+
+  if (problem && typeof problem !== 'object') {
+    const id = String(problem).trim();
+    if (id) return id;
+  }
+
+  return '';
+}
+
+function getConcreteProblemMetadata(message, op) {
+  if (op.includes('problemgroup')) return null;
+  if (op !== 'publishproblem' && op !== 'sendproblem') return null;
+  // A message containing a quiz/exam/test/... entity is a group publication.
+  // Even if it also carries a problem id, auto-answer must stay disabled.
+  if (hasAssessmentGroup(message)) return null;
+
+  const problem = findNestedValue(message, ['problem']);
+  const explicitId = findNestedValue(message, CONCRETE_PROBLEM_ID_KEYS);
+  if (problem === undefined && explicitId === undefined) return null;
+
+  const problemId = getConcreteProblemId(message);
+  if (!problemId) return null;
+
+  const slideId = scalarString(findProblemValue(message, ['sid', 'slideId', 'slide_id']));
+  const presentationId = scalarString(findProblemValue(
+    message,
+    ['pres', 'presentationId', 'presentation_id'],
+  ));
+  const startTime = findProblemValue(message, ['dt', 'startTime', 'start_time']);
+  const limit = findProblemValue(message, ['limit', 'duration']);
+  const metadata = { problemId, autoAnswerCandidate: true };
+
+  if (slideId) metadata.slideId = slideId;
+  if (presentationId) metadata.presentationId = presentationId;
+  if (startTime !== undefined && startTime !== null && typeof startTime !== 'object') {
+    metadata.startTime = startTime;
+  }
+  if (limit !== undefined && limit !== null && typeof limit !== 'object') {
+    metadata.limit = limit;
+  }
+
+  return metadata;
+}
+
 const IDENTIFIER_KEYS = [
   'id', 'uuid', 'quizId', 'quiz_id', 'examId', 'exam_id', 'testId', 'test_id',
   'exerciseId', 'exercise_id', 'presentationId', 'presentation_id', 'problemId',
@@ -84,7 +198,7 @@ function findNestedText(source, keys) {
     const value = firstText(current, keys);
     if (value) return value;
 
-    for (const key of NESTED_PAYLOAD_KEYS) {
+    for (const key of NESTED_VALUE_KEYS) {
       const nested = current[key];
       if (Array.isArray(nested)) queue.push(...nested);
       else if (nested && typeof nested === 'object') queue.push(nested);
@@ -127,10 +241,13 @@ export function classifyPublishEvent(message) {
   if (!category) return null;
 
   const entity = getEntity(message);
-  const id = getIdentifier(message, entity, op);
+  const concreteProblem = category === 'assessment'
+    ? getConcreteProblemMetadata(message, op)
+    : null;
+  const id = concreteProblem?.problemId || getIdentifier(message, entity, op);
   const detail = getDetail(message, entity);
   const title = {
-    assessment: '考试/测试题组已发布',
+    assessment: concreteProblem ? '新题目已发布' : '考试/测试题组已发布',
     courseware: '课件已发布',
     other: '课堂内容已发布',
   }[category];
@@ -140,6 +257,7 @@ export function classifyPublishEvent(message) {
     dedupeKey: `${category}:${id}`,
     title,
     detail,
+    ...concreteProblem,
   };
 }
 

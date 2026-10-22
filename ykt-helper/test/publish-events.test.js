@@ -195,3 +195,96 @@ test('keeps unlockproblem metadata when the protocol sends a scalar problem id',
   assert.equal(realtime.problem.sid, 'slide-5');
   assert.equal(realtime.problem.pres, 'presentation-2');
 });
+
+test("publishes a concrete problem as an auto-answer candidate", async () => {
+  const { classifyPublishEvent } = await loadPublishEvents();
+
+  assert.deepEqual(classifyPublishEvent({
+    op: "publishproblem",
+    problemId: "p1",
+    sid: "slide-5",
+    pres: "presentation-2",
+    dt: 100,
+    limit: 30,
+  }), {
+    category: "assessment",
+    dedupeKey: "assessment:p1",
+    title: "新题目已发布",
+    detail: "教师发布了新的课堂内容",
+    problemId: "p1",
+    autoAnswerCandidate: true,
+    slideId: "slide-5",
+    presentationId: "presentation-2",
+    startTime: 100,
+    limit: 30,
+  });
+});
+
+test("publishes sendproblem with a concrete problem object", async () => {
+  const { classifyPublishEvent } = await loadPublishEvents();
+
+  const event = classifyPublishEvent({
+    op: "sendproblem",
+    problem: { id: "p2", body: "具体题目" },
+    sid: "slide-6",
+    pres: "presentation-3",
+    dt: 200,
+    limit: 45,
+  });
+
+  assert.equal(event.problemId, "p2");
+  assert.equal(event.autoAnswerCandidate, true);
+  assert.equal(event.slideId, "slide-6");
+  assert.equal(event.presentationId, "presentation-3");
+  assert.equal(event.startTime, 200);
+  assert.equal(event.limit, 45);
+});
+
+test("does not queue quiz, exam, or problem-group publications for auto-answer", async () => {
+  const { classifyPublishEvent } = await loadPublishEvents();
+
+  for (const [key, value] of [
+    ["quiz", { id: "quiz-1" }],
+    ["exam", { id: "exam-1" }],
+    ["problemGroup", { id: "group-1" }],
+  ]) {
+    const event = classifyPublishEvent({ op: "sendproblem", [key]: value });
+    assert.equal(event.autoAnswerCandidate, undefined, key);
+    assert.equal(event.problemId, undefined, key);
+  }
+});
+
+test("keeps probleminfo as a reminder without auto-answer metadata", async () => {
+  const { classifyPublishEvent } = await loadPublishEvents();
+
+  const event = classifyPublishEvent({ op: "probleminfo", problemId: "p1" });
+
+  assert.equal(event.category, "assessment");
+  assert.equal(event.title, "考试/测试题组已发布");
+  assert.equal(event.problemId, undefined);
+  assert.equal(event.autoAnswerCandidate, undefined);
+});
+
+test("does not queue a concrete problem when the publication also contains a group", async () => {
+  const { classifyPublishEvent } = await loadPublishEvents();
+
+  const event = classifyPublishEvent({
+    op: "sendproblem",
+    problemId: "p1",
+    quiz: { id: "quiz-1" },
+  });
+
+  assert.equal(event.category, "assessment");
+  assert.equal(event.problemId, undefined);
+  assert.equal(event.autoAnswerCandidate, undefined);
+});
+
+test("detects a scalar problem value as a concrete publish", async () => {
+  const { classifyPublishEvent } = await loadPublishEvents();
+
+  const event = classifyPublishEvent({ op: "sendproblem", problem: "p1" });
+
+  assert.equal(event.dedupeKey, "assessment:p1");
+  assert.equal(event.problemId, "p1");
+  assert.equal(event.autoAnswerCandidate, true);
+});

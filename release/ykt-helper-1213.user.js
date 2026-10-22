@@ -95,9 +95,6 @@
     if (!window.jspdf?.jsPDF) throw new Error("jsPDF 未加载成功");
     return window.jspdf;
   }
-  function randInt(l, r) {
-    return l + Math.floor(Math.random() * (r - l + 1));
-  }
   // src/core/reminder-preferences.js
     const EVENT_PREFERENCE_KEYS = {
     "problem-start": "notifyProblemStarts",
@@ -227,8 +224,8 @@
       kimiApiKey: "",
       apiKey: "",
       endpoint: "https://api.moonshot.cn/v1/chat/completions",
-      model: "moonshot-v1-8k",
-      visionModel: "moonshot-v1-8k-vision-preview",
+      model: "kimi-k3",
+      visionModel: "kimi-k3",
       ocrApi: "",
       ocrApiKey: "",
       translateApi: "",
@@ -241,8 +238,8 @@
       name: "Kimi",
       baseUrl: "https://api.moonshot.cn/v1/chat/completions",
       apiKey: "",
-      model: "moonshot-v1-8k",
-      visionModel: "moonshot-v1-8k-vision-preview",
+      model: "kimi-k3",
+      visionModel: "kimi-k3",
       temperature: ""
     } ],
     activeProfileId: "default",
@@ -287,7 +284,11 @@
   }
   const storage = new StorageManager("ykt-helper:");
   // src/state/repo.js
-    const repo = {
+    function problemKey(value) {
+    const key = String(value ?? "").trim();
+    return key || null;
+  }
+  const repo = {
     presentations: new Map,
     // id -> presentation
     slides: new Map,
@@ -318,16 +319,48 @@
       });
     },
     upsertSlide(slide) {
-      this.slides.set(slide.id, slide);
+      const key = problemKey(slide?.id ?? slide?.slideId);
+      if (!key) return false;
+      this.slides.set(key, slide);
+      return true;
     },
     upsertProblem(prob) {
-      this.problems.set(prob.problemId, prob);
+      const key = problemKey(prob?.problemId ?? prob?.id);
+      if (!key) return false;
+      const normalized = prob.problemId == null ? {
+        ...prob,
+        problemId: key
+      } : prob;
+      this.problems.set(key, normalized);
+      return true;
+    },
+    getSlide(id) {
+      return this.slides.get(problemKey(id));
+    },
+    hasSlide(id) {
+      return this.slides.has(problemKey(id));
+    },
+    getProblem(id) {
+      return this.problems.get(problemKey(id));
+    },
+    hasProblem(id) {
+      return this.problems.has(problemKey(id));
+    },
+    getProblemStatus(id) {
+      return this.problemStatus.get(problemKey(id));
+    },
+    setProblemStatus(id, status) {
+      const key = problemKey(id);
+      if (!key) return false;
+      this.problemStatus.set(key, status);
+      return true;
     },
     pushEncounteredProblem(prob, slide, presentationId) {
-      if (!this.encounteredProblems.some(p => p.problemId === prob.problemId)) this.encounteredProblems.push({
-        problemId: prob.problemId,
+      const key = problemKey(prob?.problemId ?? prob?.id);
+      if (key && !this.encounteredProblems.some(p => problemKey(p.problemId) === key)) this.encounteredProblems.push({
+        problemId: prob.problemId ?? prob.id,
         problemType: prob.problemType,
-        body: prob.body || `题目ID: ${prob.problemId}`,
+        body: prob.body || `题目ID: ${prob.problemId ?? prob.id}`,
         options: prob.options || [],
         blanks: prob.blanks || [],
         answers: prob.answers || [],
@@ -380,7 +413,7 @@
       setTimeout(() => el.remove(), 500);
     }, duration);
   }
-  var tpl$5 = '<div id="ykt-settings-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>AI雨课堂助手设置</h3>\n    <div class="setting-actions">\n        <button id="ykt-btn-settings-save">保存设置</button>\n        <button id="ykt-btn-settings-reset" color="red">重置为默认</button>\n    </div>\n    <span class="close-btn" id="ykt-settings-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div class="settings-content">\n      <div class="setting-group">\n      <h4>AI配置</h4>\n\n        \x3c!-- 当前 profile 选择 --\x3e\n        <div class="setting-item">\n          <label for="ykt-ai-profile-select">当前配置：</label>\n          <select id="ykt-ai-profile-select"></select>\n          <button id="ykt-ai-profile-add">新增配置</button>\n          <button id="ykt-ai-profile-del" color="red">删除当前</button>\n        </div>\n\n        \x3c!-- 具体配置字段：针对当前 profile --\x3e\n        <div class="setting-item">\n          <label for="ykt-ai-profile-name">名称:</label>\n          <input type="text" id="ykt-ai-profile-name" placeholder="例如：Kimi 8k / OpenAI GPT-4o">\n        </div>\n\n        <div class="setting-item">\n          <label for="ykt-ai-base-url">URL:</label>\n          <input type="text" id="ykt-ai-base-url" placeholder="https://api.moonshot.cn/...">\n          <small>兼容 OpenAI 协议的服务端，例如 api.openai.com / api.moonshot.cn / 自建代理。</small>\n        </div>\n\n        <div class="setting-item">\n          <label for="kimi-api-key">API Key:</label>\n          <input type="password" id="kimi-api-key" placeholder="输入当前配置的 API Key">\n        </div>\n\n        <div class="setting-item">\n          <label for="ykt-ai-model">文本模型 ID:</label>\n          <input type="text" id="ykt-ai-model" placeholder="例如：moonshot-v1-8k / gpt-4o-mini">\n        </div>\n\n        <div class="setting-item">\n          <label for="ykt-ai-vision-model">图像模型 ID:</label>\n          <input type="text" id="ykt-ai-vision-model" placeholder="默认不填则与文本模型相同">\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-temperature">Temperature:</label>\n          <input type="number" id="ykt-ai-temperature" min="0" max="2" step="0.01" placeholder="留空则不传">\n          <small>当前 Profile 专用。留空时不发送该参数，由模型决定默认值；部分 Kimi 模型要求留空。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-ocr-api">OCR模型API:</label>\n          <input type="text" id="ykt-ai-ocr-api" placeholder="留空则复用当前 AI Profile 的 URL">\n          <small>仅用于课件“文字识别”功能；留空时走当前 AI Profile。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-ocr-api-key">OCR API Key:</label>\n          <input type="password" id="ykt-ai-ocr-api-key" placeholder="留空则复用当前 AI Profile 的 API Key">\n          <small>仅用于课件 OCR；不填时自动回退到当前 AI Profile 的 API Key。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-translate-api">翻译模型API:</label>\n          <input type="text" id="ykt-ai-translate-api" placeholder="留空则复用当前 AI Profile 的 URL">\n          <small>仅用于 OCR 结果翻译；留空时复用当前 AI Profile 的 URL。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-translate-api-key">翻译 API Key:</label>\n          <input type="password" id="ykt-ai-translate-api-key" placeholder="留空则复用当前 AI Profile 的 API Key">\n          <small>仅用于 OCR 结果翻译；留空时复用当前 AI Profile 的 API Key。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-ai-translate-model">翻译模型 ID:</label>\n          <input type="text" id="ykt-ai-translate-model" placeholder="留空则复用当前 AI Profile 的文本模型">\n          <small>建议填写纯文本模型；留空时复用当前 AI Profile 的文本模型。</small>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>UI设置</h4>\n          <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-ui-tex">\n            <span class="checkmark"></span>\n            渲染LaTeX格式的公式\n          </label>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>自动作答设置</h4>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-auto-join">\n            <span class="checkmark"></span>\n            自动进入课堂\n          </label>\n          <small>默认自动进入“正在上课”的课堂。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-auto-join-auto-answer">\n            <span class="checkmark"></span>\n            对于自动进入的课堂，默认使用自动答题\n          </label>\n          <small>仅对“自动进入”的课堂生效，不会影响手动进入课堂的行为。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-auto-answer">\n            <span class="checkmark"></span>\n            启用自动作答\n          </label>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-ai-auto-analyze">\n            <span class="checkmark"></span>\n            打开 AI 页面时自动分析\n          </label>\n          <small>开启后，进入“AI 解答”面板即自动向 AI 询问当前题目</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-answer-delay">作答延迟时间 (秒):</label>\n          <input type="number" id="ykt-input-answer-delay" min="1" max="60">\n          <small>题目出现后等待多长时间开始作答</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-random-delay">随机延迟范围 (秒):</label>\n          <input type="number" id="ykt-input-random-delay" min="0" max="30">\n          <small>在基础延迟基础上随机增加的时间范围</small>\n        </div><div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-ai-pick-main-first">\n            <span class="checkmark"></span>\n            主界面优先（未勾选则课件浏览优先）\n          </label>\n          <small>仅在普通打开 AI 面板（ykt:open-ai）时生效；从“提问当前PPT”跳转保持最高优先。</small>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>课堂提醒</h4>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-all" />\n            <span class="checkmark"></span>\n            总提醒开关\n          </label>\n          <small>关闭后，下面每一种课堂事件都会静音；工具栏铃铛与此开关同步。</small>\n        </div>\n        <h5>提醒事件</h5>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-problem-start" />\n            <span class="checkmark"></span>\n            新题 / 答题开始\n          </label>\n          <small>老师开启一道可作答习题时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-assessment-publish" />\n            <span class="checkmark"></span>\n            考试/测试题组发布提醒\n          </label>\n          <small>老师发布测试、考试或题组时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-courseware-publish" />\n            <span class="checkmark"></span>\n            课件发布提醒\n          </label>\n          <small>只在发布新课件时提醒；翻阅旧课件和翻页不会提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-other-publish" />\n            <span class="checkmark"></span>\n            其他无法分类的发布提醒\n          </label>\n          <small>用于不同学校服务器的未知发布事件；若提醒过多可单独关闭。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-lesson-finished" />\n            <span class="checkmark"></span>\n            课程结束提醒\n          </label>\n          <small>老师结束当前课程时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-scheduled" />\n            <span class="checkmark"></span>\n            自动作答已排队\n          </label>\n          <small>脚本为新题安排延迟作答时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-started" />\n            <span class="checkmark"></span>\n            自动作答开始\n          </label>\n          <small>脚本开始执行本地或 AI 作答流程时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-succeeded" />\n            <span class="checkmark"></span>\n            自动作答成功\n          </label>\n          <small>答案提交成功时提醒。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-auto-answer-failed" />\n            <span class="checkmark"></span>\n            自动作答失败\n          </label>\n          <small>截图、AI 分析或答案提交失败时提醒。</small>\n        </div>\n        <h5>提醒方式</h5>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-native" />\n            <span class="checkmark"></span>\n            系统通知\n          </label>\n          <small>调用浏览器或篡改猴的原生通知。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-popup" />\n            <span class="checkmark"></span>\n            页面弹窗\n          </label>\n          <small>在当前页面右下角显示提醒卡片。</small>\n        </div>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-notify-sound" />\n            <span class="checkmark"></span>\n            提示声音\n          </label>\n          <small>播放内置或自定义提示音。</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-notify-duration">弹窗持续时间 (秒):</label>\n          <input type="number" id="ykt-input-notify-duration" min="2" max="60" />\n          <small>习题出现时，弹窗在屏幕上的停留时长</small>\n        </div>\n        <div class="setting-item">\n          <label for="ykt-input-notify-volume">提醒音量 (0-100):</label>\n          <input type="number" id="ykt-input-notify-volume" min="0" max="100" />\n          <small>用于提示音的音量大小；建议 30~80</small>\n        </div>\n        <div class="setting-item">\n          <button id="ykt-btn-test-notify">测试习题提醒</button>\n        </div>\n        <div class="setting-item">\n          <label>自定义提示音（其一即可）</label>\n          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">\n            <input type="file" id="ykt-input-notify-audio-file" accept="audio/*" />\n            <input type="text" id="ykt-input-notify-audio-url" placeholder="或粘贴在线音频 URL（http/https/data:）" style="min-width:260px"/>\n            <button id="ykt-btn-apply-audio-url">应用URL</button>\n            <button id="ykt-btn-preview-audio">预览</button>\n            <button id="ykt-btn-clear-audio">清除自定义音频</button>\n          </div>\n          <small id="ykt-tip-audio-name" style="display:block;opacity:.8;margin-top:6px"></small>\n          <small>说明：文件将本地存储为 data URL（默认上限 2MB）。URL 需支持跨域访问；若被浏览器拦截自动播放，请先点击“预览”以授权音频播放。</small>\n        </div>\n      </div>\n\n      <div class="setting-group">\n        <h4>课堂运行</h4>\n        <div class="setting-item">\n          <label class="checkbox-label">\n            <input type="checkbox" id="ykt-input-keep-screen-awake" />\n            <span class="checkmark"></span>\n            课堂保持亮屏（仅防自动熄屏）\n          </label>\n          <small>仅在课堂页且页面可见时生效。无法阻止手动锁屏、切换到后台后的浏览器冻结；省电模式也可能拒绝该功能。</small>\n        </div>\n      </div>\n    </div>\n  </div>\n</div>\n';
+  var tpl$5 = '<div id="ykt-settings-panel" class="ykt-panel">\r\n  <div class="panel-header">\r\n    <h3>AI雨课堂助手设置</h3>\r\n    <div class="setting-actions">\r\n        <button id="ykt-btn-settings-save">保存设置</button>\r\n        <button id="ykt-btn-settings-reset" color="red">重置为默认</button>\r\n    </div>\r\n    <span class="close-btn" id="ykt-settings-close"><i class="fas fa-times"></i></span>\r\n  </div>\r\n\r\n  <div class="panel-body">\r\n    <div class="settings-content">\r\n      <div class="setting-group">\r\n      <h4>AI配置</h4>\r\n\r\n        \x3c!-- 当前 profile 选择 --\x3e\r\n        <div class="setting-item">\r\n          <label for="ykt-ai-profile-select">当前配置：</label>\r\n          <select id="ykt-ai-profile-select"></select>\r\n          <button id="ykt-ai-profile-add">新增配置</button>\r\n          <button id="ykt-ai-profile-del" color="red">删除当前</button>\r\n        </div>\r\n\r\n        \x3c!-- 具体配置字段：针对当前 profile --\x3e\r\n        <div class="setting-item">\r\n          <label for="ykt-ai-profile-name">名称:</label>\r\n          <input type="text" id="ykt-ai-profile-name" placeholder="例如：Kimi 8k / OpenAI GPT-4o">\r\n        </div>\r\n\r\n        <div class="setting-item">\r\n          <label for="ykt-ai-base-url">URL:</label>\r\n          <input type="text" id="ykt-ai-base-url" placeholder="https://api.moonshot.cn/...">\r\n          <small>兼容 OpenAI 协议的服务端，例如 api.openai.com / api.moonshot.cn / 自建代理。</small>\r\n        </div>\r\n\r\n        <div class="setting-item">\r\n          <label for="kimi-api-key">API Key:</label>\r\n          <input type="password" id="kimi-api-key" placeholder="输入当前配置的 API Key">\r\n        </div>\r\n\r\n        <div class="setting-item">\r\n          <label for="ykt-ai-model">文本模型 ID:</label>\r\n          <input type="text" id="ykt-ai-model" placeholder="例如：moonshot-v1-8k / gpt-4o-mini">\r\n        </div>\r\n\r\n        <div class="setting-item">\r\n          <label for="ykt-ai-vision-model">图像模型 ID:</label>\r\n          <input type="text" id="ykt-ai-vision-model" placeholder="默认不填则与文本模型相同">\r\n        </div>\r\n        <div class="setting-item">\r\n          <label for="ykt-ai-temperature">Temperature:</label>\r\n          <input type="number" id="ykt-ai-temperature" min="0" max="2" step="0.01" placeholder="留空则不传">\r\n          <small>当前 Profile 专用。留空时不发送该参数，由模型决定默认值；部分 Kimi 模型要求留空。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label for="ykt-ai-ocr-api">OCR模型API:</label>\r\n          <input type="text" id="ykt-ai-ocr-api" placeholder="留空则复用当前 AI Profile 的 URL">\r\n          <small>仅用于课件“文字识别”功能；留空时走当前 AI Profile。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label for="ykt-ai-ocr-api-key">OCR API Key:</label>\r\n          <input type="password" id="ykt-ai-ocr-api-key" placeholder="留空则复用当前 AI Profile 的 API Key">\r\n          <small>仅用于课件 OCR；不填时自动回退到当前 AI Profile 的 API Key。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label for="ykt-ai-translate-api">翻译模型API:</label>\r\n          <input type="text" id="ykt-ai-translate-api" placeholder="留空则复用当前 AI Profile 的 URL">\r\n          <small>仅用于 OCR 结果翻译；留空时复用当前 AI Profile 的 URL。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label for="ykt-ai-translate-api-key">翻译 API Key:</label>\r\n          <input type="password" id="ykt-ai-translate-api-key" placeholder="留空则复用当前 AI Profile 的 API Key">\r\n          <small>仅用于 OCR 结果翻译；留空时复用当前 AI Profile 的 API Key。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label for="ykt-ai-translate-model">翻译模型 ID:</label>\r\n          <input type="text" id="ykt-ai-translate-model" placeholder="留空则复用当前 AI Profile 的文本模型">\r\n          <small>建议填写纯文本模型；留空时复用当前 AI Profile 的文本模型。</small>\r\n        </div>\r\n      </div>\r\n\r\n      <div class="setting-group">\r\n        <h4>UI设置</h4>\r\n          <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-ui-tex">\r\n            <span class="checkmark"></span>\r\n            渲染LaTeX格式的公式\r\n          </label>\r\n        </div>\r\n      </div>\r\n\r\n      <div class="setting-group">\r\n        <h4>自动作答设置</h4>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-auto-join">\r\n            <span class="checkmark"></span>\r\n            自动进入课堂\r\n          </label>\r\n          <small>默认自动进入“正在上课”的课堂。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-auto-join-auto-answer">\r\n            <span class="checkmark"></span>\r\n            对于自动进入的课堂，默认使用自动答题\r\n          </label>\r\n          <small>仅对“自动进入”的课堂生效，不会影响手动进入课堂的行为。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-auto-answer">\r\n            <span class="checkmark"></span>\r\n            启用自动作答\r\n          </label>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-ai-auto-analyze">\r\n            <span class="checkmark"></span>\r\n            打开 AI 页面时自动分析\r\n          </label>\r\n          <small>开启后，进入“AI 解答”面板即自动向 AI 询问当前题目</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label for="ykt-input-answer-delay">作答延迟时间 (秒):</label>\r\n          <input type="number" id="ykt-input-answer-delay" min="1" max="60">\r\n          <small>题目出现后等待多长时间开始作答</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label for="ykt-input-random-delay">随机延迟范围 (秒):</label>\r\n          <input type="number" id="ykt-input-random-delay" min="0" max="30">\r\n          <small>在基础延迟基础上随机增加的时间范围</small>\r\n        </div><div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-ai-pick-main-first">\r\n            <span class="checkmark"></span>\r\n            主界面优先（未勾选则课件浏览优先）\r\n          </label>\r\n          <small>仅在普通打开 AI 面板（ykt:open-ai）时生效；从“提问当前PPT”跳转保持最高优先。</small>\r\n        </div>\r\n      </div>\r\n\r\n      <div class="setting-group">\r\n        <h4>课堂提醒</h4>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-all" />\r\n            <span class="checkmark"></span>\r\n            总提醒开关\r\n          </label>\r\n          <small>关闭后，下面每一种课堂事件都会静音；工具栏铃铛与此开关同步。</small>\r\n        </div>\r\n        <h5>提醒事件</h5>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-problem-start" />\r\n            <span class="checkmark"></span>\r\n            新题 / 答题开始\r\n          </label>\r\n          <small>老师开启一道可作答习题时提醒。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-assessment-publish" />\r\n            <span class="checkmark"></span>\r\n            考试/测试题组发布提醒\r\n          </label>\r\n          <small>老师发布测试、考试或题组时提醒。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-courseware-publish" />\r\n            <span class="checkmark"></span>\r\n            课件发布提醒\r\n          </label>\r\n          <small>只在发布新课件时提醒；翻阅旧课件和翻页不会提醒。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-other-publish" />\r\n            <span class="checkmark"></span>\r\n            其他无法分类的发布提醒\r\n          </label>\r\n          <small>用于不同学校服务器的未知发布事件；若提醒过多可单独关闭。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-lesson-finished" />\r\n            <span class="checkmark"></span>\r\n            课程结束提醒\r\n          </label>\r\n          <small>老师结束当前课程时提醒。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-auto-answer-scheduled" />\r\n            <span class="checkmark"></span>\r\n            自动作答已排队\r\n          </label>\r\n          <small>脚本为新题安排延迟作答时提醒。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-auto-answer-started" />\r\n            <span class="checkmark"></span>\r\n            自动作答开始\r\n          </label>\r\n          <small>脚本开始执行本地或 AI 作答流程时提醒。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-auto-answer-succeeded" />\r\n            <span class="checkmark"></span>\r\n            自动作答成功\r\n          </label>\r\n          <small>答案提交成功时提醒。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-auto-answer-failed" />\r\n            <span class="checkmark"></span>\r\n            自动作答失败\r\n          </label>\r\n          <small>截图、AI 分析或答案提交失败时提醒。</small>\r\n        </div>\r\n        <h5>提醒方式</h5>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-native" />\r\n            <span class="checkmark"></span>\r\n            系统通知\r\n          </label>\r\n          <small>调用浏览器或篡改猴的原生通知。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-popup" />\r\n            <span class="checkmark"></span>\r\n            页面弹窗\r\n          </label>\r\n          <small>在当前页面右下角显示提醒卡片。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-notify-sound" />\r\n            <span class="checkmark"></span>\r\n            提示声音\r\n          </label>\r\n          <small>播放内置或自定义提示音。</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label for="ykt-input-notify-duration">弹窗持续时间 (秒):</label>\r\n          <input type="number" id="ykt-input-notify-duration" min="2" max="60" />\r\n          <small>习题出现时，弹窗在屏幕上的停留时长</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label for="ykt-input-notify-volume">提醒音量 (0-100):</label>\r\n          <input type="number" id="ykt-input-notify-volume" min="0" max="100" />\r\n          <small>用于提示音的音量大小；建议 30~80</small>\r\n        </div>\r\n        <div class="setting-item">\r\n          <button id="ykt-btn-test-notify">测试习题提醒</button>\r\n        </div>\r\n        <div class="setting-item">\r\n          <label>自定义提示音（其一即可）</label>\r\n          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">\r\n            <input type="file" id="ykt-input-notify-audio-file" accept="audio/*" />\r\n            <input type="text" id="ykt-input-notify-audio-url" placeholder="或粘贴在线音频 URL（http/https/data:）" style="min-width:260px"/>\r\n            <button id="ykt-btn-apply-audio-url">应用URL</button>\r\n            <button id="ykt-btn-preview-audio">预览</button>\r\n            <button id="ykt-btn-clear-audio">清除自定义音频</button>\r\n          </div>\r\n          <small id="ykt-tip-audio-name" style="display:block;opacity:.8;margin-top:6px"></small>\r\n          <small>说明：文件将本地存储为 data URL（默认上限 2MB）。URL 需支持跨域访问；若被浏览器拦截自动播放，请先点击“预览”以授权音频播放。</small>\r\n        </div>\r\n      </div>\r\n\r\n      <div class="setting-group">\r\n        <h4>课堂运行</h4>\r\n        <div class="setting-item">\r\n          <label class="checkbox-label">\r\n            <input type="checkbox" id="ykt-input-keep-screen-awake" />\r\n            <span class="checkmark"></span>\r\n            课堂保持亮屏（仅防自动熄屏）\r\n          </label>\r\n          <small>仅在课堂页且页面可见时生效。无法阻止手动锁屏、切换到后台后的浏览器冻结；省电模式也可能拒绝该功能。</small>\r\n        </div>\r\n      </div>\r\n    </div>\r\n  </div>\r\n</div>\r\n';
   function defaultNavigator() {
     if (typeof window !== "undefined") return window.navigator;
     return typeof globalThis !== "undefined" ? globalThis.navigator : null;
@@ -571,8 +604,8 @@
         name: "Kimi",
         baseUrl: "https://api.moonshot.cn/v1/chat/completions",
         apiKey: legacyKey,
-        model: "moonshot-v1-8k",
-        visionModel: "moonshot-v1-8k-vision-preview",
+        model: "kimi-k3",
+        visionModel: "kimi-k3",
         temperature: ""
       } ];
       configAI.activeProfileId = "default";
@@ -878,7 +911,7 @@
     const panel = document.getElementById("ykt-settings-panel");
     showSettingsPanel(!panel.classList.contains("visible"));
   }
-  var tpl$4 = '<div id="ykt-ai-answer-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3><i class="fas fa-robot"></i> AI 融合分析</h3>\n    <span id="ykt-ai-close" class="close-btn" title="关闭">\n      <i class="fas fa-times"></i>\n    </span>\n  </div>\n  <div class="panel-body">\n    <div style="margin-bottom: 10px;">\n      <strong>当前题目：</strong>\n      <div style="font-size: 12px; color: #666; margin: 4px 0;">\n        系统将自动识别当前页面的题目\n      </div>\n      <div id="ykt-ai-text-status" class="text-status warning">\n        正在检测题目信息...\n      </div>\n      <div id="ykt-ai-question-display" class="ykt-question-display">\n        提示：系统使用融合模式，同时分析题目文本信息和页面图像，提供最准确的答案。\n      </div>\n    </div>\n    \x3c!-- 当前要提问的PPT预览 --\x3e\n    <div id="ykt-ai-selected" style="display:none; margin: 10px 0;">\n      <strong>已选PPT预览：</strong>\n      <div style="font-size: 12px; color: #666; margin: 4px 0;">\n        下方小图为即将用于分析的PPT页面截图\n      </div>\n      <div style="border: 1px solid var(--ykt-border-strong); padding: 6px; border-radius: 6px; display: inline-block;">\n        \x3c!-- 兼容旧单页：仍保留该 img --\x3e\n        <img id="ykt-ai-selected-thumb"\n             alt="已选PPT预览"\n             style="max-width: 180px; max-height: 120px; display:none;" />\n\n        \x3c!-- 多页预览容器：由 ai.js 动态填充 --\x3e\n        <div id="ykt-ai-selected-thumbs"\n             style="display:flex; flex-wrap:wrap; gap:6px; max-width: 420px;">\n        </div>\n      </div>\n    </div>\n    <div style="margin-bottom: 10px;">\n      <strong>自定义提示（可选）：</strong>\n      <div style="font-size: 12px; color: #666; margin: 4px 0;">\n        提示：此内容将追加到系统生成的prompt后面，可用于补充特殊要求或背景信息。\n      </div>\n      <textarea \n        id="ykt-ai-custom-prompt" \n        class="ykt-custom-prompt"\n        placeholder="例如：请用中文回答、注重解题思路、考虑XXX知识点等"\n      ></textarea>\n    </div>\n\n    <button id="ykt-ai-ask" style="width: 100%; height: 32px; border-radius: 6px; border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer; margin-bottom: 10px;">\n      <i class="fas fa-brain"></i> 融合模式分析（文本+图像）\n    </button>\n\n    <div id="ykt-ai-loading" class="ai-loading" style="display: none;">\n      <i class="fas fa-spinner fa-spin"></i> AI正在使用融合模式分析...\n    </div>\n    <div id="ykt-ai-error" class="ai-error" style="display: none;"></div>\n    <div>\n      <strong>AI 分析结果：</strong>\n      <div id="ykt-ai-answer" class="ai-answer"></div>\n    </div>\n    \x3c!-- 可编辑答案区 --\x3e\n    <div id="ykt-ai-edit-section" style="display:none; margin-top:12px;">\n      <strong>提交前可编辑答案：</strong>\n      <div style="font-size: 12px; color: #666; margin: 4px 0;">\n        提示：这里是将要提交的“结构化答案”。可直接编辑。支持：\n        <br>• 选择题/投票：填写 <code>["A"]</code> 或 <code>A,B</code>\n        <br>• 填空题：填写 <code>[" 1"]</code> 或 直接写 <code> 1</code>（自动包成数组）\n        <br>• 主观题：可填 JSON（如 <code>{"content":"略","pics":[]}</code>）或直接输入文本\n      </div>\n      <textarea id="ykt-ai-answer-edit"\n        style="width:100%; min-height:88px; border:1px solid var(--ykt-border-strong); border-radius:6px; padding:6px; font-family:monospace;"></textarea>\n      <div id="ykt-ai-validate" style="font-size:12px; color:#666; margin-top:6px;"></div>\n      <div style="margin-top:8px; display:flex; gap:8px;">\n        <button id="ykt-ai-submit" class="ykt-btn ykt-btn-primary" style="flex:0 0 auto;">\n          提交编辑后的答案\n        </button>\n        <button id="ykt-ai-reset-edit" class="ykt-btn" style="flex:0 0 auto;">重置为 AI 建议</button>\n      </div>\n    </div>\n  </div>\n</div>';
+  var tpl$4 = '<div id="ykt-ai-answer-panel" class="ykt-panel">\r\n  <div class="panel-header">\r\n    <h3><i class="fas fa-robot"></i> AI 融合分析</h3>\r\n    <span id="ykt-ai-close" class="close-btn" title="关闭">\r\n      <i class="fas fa-times"></i>\r\n    </span>\r\n  </div>\r\n  <div class="panel-body">\r\n    <div style="margin-bottom: 10px;">\r\n      <strong>当前题目：</strong>\r\n      <div style="font-size: 12px; color: #666; margin: 4px 0;">\r\n        系统将自动识别当前页面的题目\r\n      </div>\r\n      <div id="ykt-ai-text-status" class="text-status warning">\r\n        正在检测题目信息...\r\n      </div>\r\n      <div id="ykt-ai-question-display" class="ykt-question-display">\r\n        提示：系统使用融合模式，同时分析题目文本信息和页面图像，提供最准确的答案。\r\n      </div>\r\n    </div>\r\n    \x3c!-- 当前要提问的PPT预览 --\x3e\r\n    <div id="ykt-ai-selected" style="display:none; margin: 10px 0;">\r\n      <strong>已选PPT预览：</strong>\r\n      <div style="font-size: 12px; color: #666; margin: 4px 0;">\r\n        下方小图为即将用于分析的PPT页面截图\r\n      </div>\r\n      <div style="border: 1px solid var(--ykt-border-strong); padding: 6px; border-radius: 6px; display: inline-block;">\r\n        \x3c!-- 兼容旧单页：仍保留该 img --\x3e\r\n        <img id="ykt-ai-selected-thumb"\r\n             alt="已选PPT预览"\r\n             style="max-width: 180px; max-height: 120px; display:none;" />\r\n\r\n        \x3c!-- 多页预览容器：由 ai.js 动态填充 --\x3e\r\n        <div id="ykt-ai-selected-thumbs"\r\n             style="display:flex; flex-wrap:wrap; gap:6px; max-width: 420px;">\r\n        </div>\r\n      </div>\r\n    </div>\r\n    <div style="margin-bottom: 10px;">\r\n      <strong>自定义提示（可选）：</strong>\r\n      <div style="font-size: 12px; color: #666; margin: 4px 0;">\r\n        提示：此内容将追加到系统生成的prompt后面，可用于补充特殊要求或背景信息。\r\n      </div>\r\n      <textarea \r\n        id="ykt-ai-custom-prompt" \r\n        class="ykt-custom-prompt"\r\n        placeholder="例如：请用中文回答、注重解题思路、考虑XXX知识点等"\r\n      ></textarea>\r\n    </div>\r\n\r\n    <button id="ykt-ai-ask" style="width: 100%; height: 32px; border-radius: 6px; border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer; margin-bottom: 10px;">\r\n      <i class="fas fa-brain"></i> 融合模式分析（文本+图像）\r\n    </button>\r\n\r\n    <div id="ykt-ai-loading" class="ai-loading" style="display: none;">\r\n      <i class="fas fa-spinner fa-spin"></i> AI正在使用融合模式分析...\r\n    </div>\r\n    <div id="ykt-ai-error" class="ai-error" style="display: none;"></div>\r\n    <div>\r\n      <strong>AI 分析结果：</strong>\r\n      <div id="ykt-ai-answer" class="ai-answer"></div>\r\n    </div>\r\n    \x3c!-- 可编辑答案区 --\x3e\r\n    <div id="ykt-ai-edit-section" style="display:none; margin-top:12px;">\r\n      <strong>提交前可编辑答案：</strong>\r\n      <div style="font-size: 12px; color: #666; margin: 4px 0;">\r\n        提示：这里是将要提交的“结构化答案”。可直接编辑。支持：\r\n        <br>• 选择题/投票：填写 <code>["A"]</code> 或 <code>A,B</code>\r\n        <br>• 填空题：填写 <code>[" 1"]</code> 或 直接写 <code> 1</code>（自动包成数组）\r\n        <br>• 主观题：可填 JSON（如 <code>{"content":"略","pics":[]}</code>）或直接输入文本\r\n      </div>\r\n      <textarea id="ykt-ai-answer-edit"\r\n        style="width:100%; min-height:88px; border:1px solid var(--ykt-border-strong); border-radius:6px; padding:6px; font-family:monospace;"></textarea>\r\n      <div id="ykt-ai-validate" style="font-size:12px; color:#666; margin-top:6px;"></div>\r\n      <div style="margin-top:8px; display:flex; gap:8px;">\r\n        <button id="ykt-ai-submit" class="ykt-btn ykt-btn-primary" style="flex:0 0 auto;">\r\n          提交编辑后的答案\r\n        </button>\r\n        <button id="ykt-ai-reset-edit" class="ykt-btn" style="flex:0 0 auto;">重置为 AI 建议</button>\r\n      </div>\r\n    </div>\r\n  </div>\r\n</div>';
   // src/ai/kimi.js
   // 将后端 problemType 数字映射为 Step1/Step2 使用的 question_type 字符串
   // 约定：
@@ -910,6 +943,7 @@
       return null;
     }
   }
+  const MOONSHOT_CHAT_HOSTS = new Set([ "api.moonshot.cn", "api.moonshot.ai" ]);
   function getActiveProfile(aiCfg) {
     const cfg = aiCfg || {};
     const profiles = Array.isArray(cfg.profiles) ? cfg.profiles : [];
@@ -921,8 +955,8 @@
         name: "Kimi Legacy",
         baseUrl: "https://api.moonshot.cn/v1/chat/completions",
         apiKey: legacyKey,
-        model: "moonshot-v1-8k",
-        visionModel: "moonshot-v1-8k-vision-preview"
+        model: "kimi-k3",
+        visionModel: "kimi-k3"
       };
     }
     const activeId = cfg.activeProfileId;
@@ -932,9 +966,34 @@
     return p;
   }
   function makeChatUrl(profile) {
-    //   const base = (profile.baseUrl || 'https://api.moonshot.cn').replace(/\/+$/,'');
-    //   return `${base}/v1/chat/completions`;
-    return profile.baseUrl;
+    const rawUrl = String(profile?.baseUrl || "").trim();
+    if (!rawUrl) throw new Error("请先在设置中填写 AI 接口 URL");
+    let url;
+    try {
+      url = new URL(rawUrl);
+    } catch {
+      throw new Error("AI 接口 URL 格式无效，请填写完整的 http(s) 地址");
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("AI 接口 URL 必须使用 http 或 https");
+    // Kimi 的 Chat Completions 接口地址是 /v1/chat/completions。
+    // 兼容误填 /v1、/v1/responses，或漏写接口路径的情况。
+        if (MOONSHOT_CHAT_HOSTS.has(url.hostname.toLowerCase())) {
+      const path = url.pathname.replace(/\/+$/, "") || "/";
+      if (path === "/" || path === "/v1" || /^\/v1\/responses?$/i.test(path)) url.pathname = "/v1/chat/completions"; else if (path === "/v1/chat/completions") url.pathname = path;
+    }
+    return url.toString();
+  }
+  function assertValidChatPayload(payload) {
+    if (!payload || typeof payload !== "object") throw new Error("AI 请求体无效，已阻止发送");
+    if (!Array.isArray(payload.messages) || payload.messages.length === 0) throw new Error("AI 请求体 messages 为空，已阻止发送");
+    payload.messages.forEach((message, index) => {
+      if (!message || typeof message !== "object") throw new Error(`AI 请求体第 ${index + 1} 条消息无效，已阻止发送`);
+      if (typeof message.role !== "string" || !message.role.trim()) throw new Error(`AI 请求体第 ${index + 1} 条消息缺少 role，已阻止发送`);
+      const hasText = typeof message.content === "string" && message.content.trim();
+      const hasParts = Array.isArray(message.content) && message.content.length > 0;
+      if (!hasText && !hasParts) throw new Error(`AI 请求体第 ${index + 1} 条消息内容为空，已阻止发送`);
+    });
+    return payload;
   }
   function withProfileTemperature(profile, payload) {
     const {temperature: _legacyTemperature, ...requestPayload} = payload;
@@ -956,6 +1015,7 @@
   // 通用 OpenAI 协议聊天请求封装（用于 Vision 两步调用）
     function chatCompletion(profile, payload, debugLabel = "[AI OpenAI]", timeoutMs = 6e4) {
     const url = makeChatUrl(profile);
+    const requestPayload = assertValidChatPayload(withProfileTemperature(profile, payload));
     return new Promise((resolve, reject) => {
       gm.xhr({
         method: "POST",
@@ -964,7 +1024,7 @@
           "Content-Type": "application/json",
           Authorization: `Bearer ${profile.apiKey}`
         },
-        data: JSON.stringify(withProfileTemperature(profile, payload)),
+        data: JSON.stringify(requestPayload),
         timeout: timeoutMs,
         onload: res => {
           try {
@@ -2267,7 +2327,21 @@
   async function askAIForCurrent() {
     return askAIFusionMode();
   }
-  var tpl$3 = '<div id="ykt-presentation-panel" class="ykt-panel">\n  <style>\n    #ykt-presentation-panel .slide-thumb.selected {\n      outline: 2px solid #3b82f6;\n      outline-offset: 2px;\n    }\n  </style>\n  <div class="panel-header">\n    <h3>课件查看</h3>\n    <div class="panel-controls">\n      <label>\n        <input type="checkbox" id="ykt-show-all-slides"> 切换全部页面/问题页面\n      </label>\n      <button id="ykt-ask-current">提问当前PPT</button>\n      <button id="ykt-ocr-current">文字识别</button>\n      <button id="ykt-open-problem-list">题目列表</button>\n      <button id="ykt-download-current">截图下载</button>\n      <button id="ykt-download-pdf">整册下载(PDF)</button>\n      <span class="close-btn" id="ykt-presentation-close"><i class="fas fa-times"></i></span>\n    </div>\n  </div>\n\n  <div class="panel-body">\n    <div class="panel-left">\n      <div id="ykt-presentation-list" class="presentation-list"></div>\n    </div>\n    <div class="panel-right">\n      <div id="ykt-slide-view" class="slide-view">\n        <div class="slide-cover">\n          <div class="empty-message">选择左侧的幻灯片查看详情</div>\n        </div>\n        <div id="ykt-problem-view" class="problem-view"></div>\n      </div>\n      <div id="ykt-ocr-panel" class="ocr-panel">\n        <div class="ocr-head">\n          <span>文字结果</span>\n          <span id="ykt-ocr-status" class="ocr-status">未开始</span>\n        </div>\n        <div id="ykt-ocr-tip" class="ocr-tip">选择课件页后点击“文字识别”。</div>\n        <textarea id="ykt-ocr-result" class="ocr-result" readonly placeholder="识别结果会显示在这里，支持直接复制。"></textarea>\n        <div class="ocr-translate-bar">\n          <label for="ykt-translate-target">目标语言</label>\n          <input type="text" id="ykt-translate-target" class="ocr-target-input" placeholder="默认使用浏览器语言">\n          <button id="ykt-translate-toggle">翻译</button>\n          <span id="ykt-translate-status" class="ocr-status">未翻译</span>\n        </div>\n        <div id="ykt-translate-tip" class="ocr-tip">默认翻译到浏览器语言，也可手动修改目标语言。</div>\n      </div>\n    </div>\n  </div>\n</div>\n';
+  var tpl$3 = '<div id="ykt-presentation-panel" class="ykt-panel">\r\n  <style>\r\n    #ykt-presentation-panel .slide-thumb.selected {\r\n      outline: 2px solid #3b82f6;\r\n      outline-offset: 2px;\r\n    }\r\n  </style>\r\n  <div class="panel-header">\r\n    <h3>课件查看</h3>\r\n    <div class="panel-controls">\r\n      <label>\r\n        <input type="checkbox" id="ykt-show-all-slides"> 切换全部页面/问题页面\r\n      </label>\r\n      <button id="ykt-ask-current">提问当前PPT</button>\r\n      <button id="ykt-ocr-current">文字识别</button>\r\n      <button id="ykt-open-problem-list">题目列表</button>\r\n      <button id="ykt-download-current">截图下载</button>\r\n      <button id="ykt-download-pdf">整册下载(PDF)</button>\r\n      <span class="close-btn" id="ykt-presentation-close"><i class="fas fa-times"></i></span>\r\n    </div>\r\n  </div>\r\n\r\n  <div class="panel-body">\r\n    <div class="panel-left">\r\n      <div id="ykt-presentation-list" class="presentation-list"></div>\r\n    </div>\r\n    <div class="panel-right">\r\n      <div id="ykt-slide-view" class="slide-view">\r\n        <div class="slide-cover">\r\n          <div class="empty-message">选择左侧的幻灯片查看详情</div>\r\n        </div>\r\n        <div id="ykt-problem-view" class="problem-view"></div>\r\n      </div>\r\n      <div id="ykt-ocr-panel" class="ocr-panel">\r\n        <div class="ocr-head">\r\n          <span>文字结果</span>\r\n          <span id="ykt-ocr-status" class="ocr-status">未开始</span>\r\n        </div>\r\n        <div id="ykt-ocr-tip" class="ocr-tip">选择课件页后点击“文字识别”。</div>\r\n        <textarea id="ykt-ocr-result" class="ocr-result" readonly placeholder="识别结果会显示在这里，支持直接复制。"></textarea>\r\n        <div class="ocr-translate-bar">\r\n          <label for="ykt-translate-target">目标语言</label>\r\n          <input type="text" id="ykt-translate-target" class="ocr-target-input" placeholder="默认使用浏览器语言">\r\n          <button id="ykt-translate-toggle">翻译</button>\r\n          <span id="ykt-translate-status" class="ocr-status">未翻译</span>\r\n        </div>\r\n        <div id="ykt-translate-tip" class="ocr-tip">默认翻译到浏览器语言，也可手动修改目标语言。</div>\r\n      </div>\r\n    </div>\r\n  </div>\r\n</div>\r\n';
+  function slideIdOf(slide) {
+    return slide?.id == null ? null : String(slide.id);
+  }
+  function getVisibleSlides(slides, {showAllSlides: showAllSlides = false, currentSlideId: currentSlideId = null} = {}) {
+    const list = Array.isArray(slides) ? slides.filter(Boolean) : [];
+    if (showAllSlides || list.length === 0) return list;
+    const problemSlides = list.filter(slide => slide?.problem);
+    if (problemSlides.length === 0) return list;
+    const currentId = currentSlideId == null ? null : String(currentSlideId);
+    if (!currentId) return problemSlides;
+    if (problemSlides.some(slide => slideIdOf(slide) === currentId)) return problemSlides;
+    const hasCurrentSlide = list.some(slide => slideIdOf(slide) === currentId);
+    return hasCurrentSlide ? list.filter(slide => slide?.problem || slideIdOf(slide) === currentId) : problemSlides;
+  }
   let mounted$4 = false;
   let host;
   let staticReportReady = false;
@@ -2872,15 +2946,27 @@
       const slidesWrap = document.createElement("div");
       slidesWrap.className = "slide-thumb-list";
       const showAll = !!ui.config.showAllSlides;
-      const slides = presentation.slides || [];
-      const slidesToShow = showAll ? slides : slides.filter(s => s.problem);
+      const slides = Array.isArray(presentation.slides) ? presentation.slides : [];
+      const problemSlideCount = slides.filter(s => s?.problem).length;
+      const slidesToShow = getVisibleSlides(slides, {
+        showAllSlides: showAll,
+        currentSlideId: repo.currentSlideId
+      });
       const currentIdStr = repo.currentSlideId != null ? String(repo.currentSlideId) : null;
       L$1("渲染课件缩略图", {
         presId: String(presentation.id),
         slidesTotal: slides.length,
+        problemSlideCount: problemSlideCount,
         slidesShown: slidesToShow.length,
+        fellBackToAll: !showAll && slides.length > 0 && problemSlideCount === 0,
         currentSlideId: currentIdStr
       });
+      if (slidesToShow.length === 0) {
+        const emptyEl = document.createElement("p");
+        emptyEl.className = "no-presentations";
+        emptyEl.textContent = slides.length === 0 ? "该课件暂无页面数据" : "当前筛选下没有可显示页面";
+        slidesWrap.appendChild(emptyEl);
+      }
       for (const s of slidesToShow) {
         const presIdStr = String(presentation.id);
         const slideIdStr = String(s.id);
@@ -2955,21 +3041,38 @@
           });
           actions.navigateTo(presIdStr, slideIdStr);
         });
+        const imageUrl = getSlideImageUrl(s);
+        const pageNumber = s.index ?? s.page ?? "";
         const img = document.createElement("img");
         if (presentation.width && presentation.height) img.style.aspectRatio = `${presentation.width}/${presentation.height}`;
-        img.src = s.thumbnail || "";
-        img.alt = s.title || `第 ${s.page ?? ""} 页`;
-        img.onerror = function() {
-          W$1("缩略图加载失败，移除该项", {
-            slideIdStr: slideIdStr,
-            src: img.src
-          });
-          if (thumb.parentNode) thumb.parentNode.removeChild(thumb);
+        img.alt = s.title || `第 ${pageNumber} 页`;
+        const placeholder = document.createElement("div");
+        placeholder.className = "slide-thumb-placeholder";
+        const showPlaceholder = message => {
+          if (img.parentNode) img.remove();
+          placeholder.textContent = message;
+          if (!placeholder.parentNode) thumb.appendChild(placeholder);
         };
+        if (imageUrl) {
+          img.src = imageUrl;
+          img.decoding = "async";
+          img.onerror = function() {
+            W$1("缩略图加载失败，保留占位项", {
+              slideIdStr: slideIdStr,
+              src: img.src
+            });
+            showPlaceholder(`第 ${pageNumber || "?"} 页\n缩略图加载失败`);
+          };
+          thumb.appendChild(img);
+        } else {
+          W$1("缩略图地址为空，使用占位项", {
+            slideIdStr: slideIdStr
+          });
+          showPlaceholder(`第 ${pageNumber || "?"} 页\n暂无缩略图`);
+        }
         const idx = document.createElement("span");
         idx.className = "slide-index";
-        idx.textContent = s.index ?? "";
-        thumb.appendChild(img);
+        idx.textContent = pageNumber;
         thumb.appendChild(idx);
         slidesWrap.appendChild(thumb);
       }
@@ -3091,8 +3194,10 @@
     if (!pid) return ui.toast("请先在左侧选择一份课件");
     const pres = repo.presentations.get(pid);
     if (!pres || !Array.isArray(pres.slides) || pres.slides.length === 0) return ui.toast("未找到该课件的页面");
-    const showAll = !!ui.config.showAllSlides;
-    const slides = pres.slides.filter(s => showAll || s.problem);
+    const slides = getVisibleSlides(pres.slides, {
+      showAllSlides: !!ui.config.showAllSlides,
+      currentSlideId: repo.currentSlideId
+    });
     if (slides.length === 0) return ui.toast("当前筛选下没有可导出的页面");
     try {
       await ensureJsPDF();
@@ -3138,7 +3243,7 @@
       ui.toast(`导出 PDF 失败：${e.message || e}`);
     }
   }
-  var tpl$2 = '<div id="ykt-problem-list-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>课堂习题列表</h3>\n    <span class="close-btn" id="ykt-problem-list-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div id="ykt-problem-list" class="problem-list">\n      \x3c!-- 由 problem-list.js 动态填充：\n           .problem-row\n             .problem-title\n             .problem-meta\n             .problem-actions (查看 / AI解答 / 已作答) --\x3e\n    </div>\n  </div>\n</div>\n';
+  var tpl$2 = '<div id="ykt-problem-list-panel" class="ykt-panel">\r\n  <div class="panel-header">\r\n    <h3>课堂习题列表</h3>\r\n    <span class="close-btn" id="ykt-problem-list-close"><i class="fas fa-times"></i></span>\r\n  </div>\r\n\r\n  <div class="panel-body">\r\n    <div id="ykt-problem-list" class="problem-list">\r\n      \x3c!-- 由 problem-list.js 动态填充：\r\n           .problem-row\r\n             .problem-title\r\n             .problem-meta\r\n             .problem-actions (查看 / AI解答 / 已作答) --\x3e\r\n    </div>\r\n  </div>\r\n</div>\r\n';
   function sleep(ms) {
     return new Promise(r => setTimeout(r, Math.max(0, ms | 0)));
   }
@@ -3194,13 +3299,14 @@
    * @param {any} result
    * @param {{headers?:Record<string,string>, dt?:number}} [options]
    */  async function answerProblem(problem, result, options = {}) {
+    const pid = problem?.problemId ?? problem?.id;
     const url = "/api/v3/lesson/problem/answer";
     const headers = {
       ...DEFAULT_HEADERS(),
       ...options.headers || {}
     };
     const payload = {
-      problemId: problem.problemId,
+      problemId: pid,
       problemType: problem.problemType,
       dt: options.dt ?? Date.now(),
       result: result
@@ -3217,6 +3323,7 @@
    * @param {number} dt - simulated answer time (epoch ms)
    * @param {{headers?:Record<string,string>}} [options]
    */  async function retryAnswer(problem, result, dt, options = {}) {
+    const pid = problem?.problemId ?? problem?.id;
     const url = "/api/v3/lesson/problem/retry";
     const headers = {
       ...DEFAULT_HEADERS(),
@@ -3224,7 +3331,7 @@
     };
     const payload = {
       problems: [ {
-        problemId: problem.problemId,
+        problemId: pid,
         problemType: problem.problemType,
         dt: dt,
         result: result
@@ -3233,7 +3340,7 @@
     const resp = await xhrPost(url, payload, headers);
     if (resp.code !== 0) throw new Error(`${resp.msg} (${resp.code})`);
     const okList = resp?.data?.success || [];
-    if (!Array.isArray(okList) || !okList.includes(problem.problemId)) throw new Error("服务器未返回成功信息");
+    if (!Array.isArray(okList) || !okList.some(id => String(id) === String(pid))) throw new Error("服务器未返回成功信息");
     return resp;
   }
   /**
@@ -3244,7 +3351,7 @@
    * @param {any} result
    * @param {Object} submitOptions
    * @param {number} [submitOptions.startTime] - unlock time (epoch ms). Required for retry path.
-   * @param {number} [submitOptions.endTime]   - deadline (epoch ms). If now >= endTime -> retry path.
+   * @param {number|null} [submitOptions.endTime] - deadline (epoch ms); null means unlimited.
    * @param {boolean} [submitOptions.forceRetry=false] - when past deadline, directly use retry without prompting.
    * @param {number} [submitOptions.retryDtOffsetMs=2000] - dt = startTime + offset when retrying.
    * @param {Record<string,string>} [submitOptions.headers] - extra/override headers.
@@ -3253,6 +3360,7 @@
    * @param {boolean} [submitOptions.autoGate=true]  - 是否启用“自动进入课堂/默认自动答题”的判定（向后兼容，默认开启）
    * @param {number} [submitOptions.waitMs]          - 覆盖自动等待时间；未提供时按设置计算
    */  async function submitAnswer(problem, result, submitOptions = {}) {
+    const pid = problem?.problemId ?? problem?.id;
     const startTime = submitOptions?.startTime;
     const endTime = submitOptions?.endTime;
     const forceRetry = submitOptions?.forceRetry ?? false;
@@ -3274,11 +3382,11 @@
     const pastDeadline = typeof endTime === "number" && now >= endTime;
     if (pastDeadline || forceRetry) {
       console.group("[雨课堂助手][DEBUG][answer] >>> 进入补交分支判断");
-      console.log("problemId:", problem.problemId);
+      console.log("problemId:", pid);
       console.log("pastDeadline:", pastDeadline, "(now=", now, ", endTime=", endTime, ")");
       console.log("forceRetry:", forceRetry);
       console.log("传入 startTime:", startTime, "传入 endTime:", endTime);
-      const ps = repo?.problemStatus?.get?.(problem.problemId);
+      const ps = repo?.getProblemStatus?.(pid);
       console.log("从 repo.problemStatus 获取:", ps);
       const st = Number.isFinite(startTime) ? startTime : ps?.startTime;
       const et = Number.isFinite(endTime) ? endTime : ps?.endTime;
@@ -3303,7 +3411,7 @@
           headers: headers
         });
         console.log("[雨课堂助手][INFO][answer] 补交成功 (/retry)", {
-          problemId: problem.problemId,
+          problemId: pid,
           dt: dt,
           pastDeadline: pastDeadline,
           forceRetry: forceRetry
@@ -3781,7 +3889,19 @@
       container.appendChild(row);
     });
   }
-  var tpl$1 = '<div id="ykt-active-problems-panel" class="ykt-active-wrapper">\n  <div id="ykt-active-problems" class="active-problems"></div>\n</div>\n';
+  var tpl$1 = '<div id="ykt-active-problems-panel" class="ykt-active-wrapper">\r\n  <div id="ykt-active-problems" class="active-problems"></div>\r\n</div>\r\n';
+  function deadlineFromLimit(startTime, limit) {
+    const start = Number(startTime);
+    const seconds = Number(limit);
+    if (!Number.isFinite(start) || !Number.isFinite(seconds) || seconds <= 0) return null;
+    return start + seconds * 1e3;
+  }
+  function isDeadlineReached(endTime, now = Date.now()) {
+    return Number.isFinite(endTime) && now >= endTime;
+  }
+  function remainingSeconds(endTime, now = Date.now()) {
+    return Number.isFinite(endTime) ? Math.max(0, Math.floor((endTime - now) / 1e3)) : null;
+  }
   let mounted$2 = false;
   let root$2;
   function $$1(sel) {
@@ -3806,8 +3926,8 @@
     repo.problemStatus.forEach((status, pid) => {
       const p = repo.problems.get(pid);
       if (!p || p.result) return;
-      const remain = Math.max(0, Math.floor((status.endTime - now) / 1e3));
-      if (remain <= 0) {
+      const remain = remainingSeconds(status.endTime, now);
+      if (remain !== null && remain <= 0) {
         console.log(`[雨课堂助手][INFO][ActiveProblems] 题目 ${pid} 倒计时已结束，移除卡片`);
         return;
       }
@@ -3820,7 +3940,7 @@
       card.appendChild(title);
       const info = document.createElement("div");
       info.className = "ap-info";
-      info.textContent = `剩余 ${remain}s`;
+      info.textContent = remain === null ? "不限时" : `剩余 ${remain}s`;
       card.appendChild(info);
       const bar = document.createElement("div");
       bar.className = "ap-actions";
@@ -3837,7 +3957,7 @@
     });
     if (!hasActiveProblems) root$2.style.display = "none"; else root$2.style.display = "";
   }
-  var tpl = '<div id="ykt-tutorial-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>雨课堂助手使用教程</h3>\n    <span class="close-btn" id="ykt-tutorial-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div class="tutorial-content">\n      <h4>工具版本</h4>\n      <p>1.21.3</p>\n\n      <h4>功能介绍</h4>\n      <p>AI雨课堂助手是一个为雨课堂提供辅助功能的工具，可以帮助你更好地参与课堂互动。</p>\n      <p>项目仓库：<a href="https://github.com/ZaytsevZY/yuketang-helper-auto" target="_blank" rel="noopener">GitHub</a></p>\n      <p>脚本安装：<a href="https://greasyfork.org/zh-CN/scripts/531469-ai%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B-%E6%A8%A1%E5%9D%97%E5%8C%96%E6%9E%84%E5%BB%BA%E7%89%88" target="_blank" rel="noopener">GreasyFork</a></p>\n\n      <h4>工具栏按钮说明</h4>\n      <ul>\n        <li><i class="fas fa-bell"></i> <b>习题提醒</b>：切换是否在新习题出现时显示通知提示（蓝色=开启）。</li>\n        <li><i class="fas fa-file-powerpoint"></i> <b>课件浏览</b>：查看课件与题目页面，提问可见内容。</li>\n        <li><i class="fas fa-robot"></i> <b>AI 解答</b>：向 AI 询问当前题目并显示建议答案。</li>\n        <li><i class="fas fa-magic-wand-sparkles"></i> <b>自动作答</b>：切换自动作答（蓝色=开启）。</li>\n        <li><i class="fas fa-cog"></i> <b>设置</b>：配置 API 密钥与自动作答参数。</li>\n        <li><i class="fas fa-question-circle"></i> <b>使用教程</b>：显示/隐藏当前教程页面。</li>\n      </ul>\n\n      <h4>自动作答</h4>\n      <ul>\n        <li>在设置中开启自动作答并配置延迟/随机延迟。</li>\n        <li>需要配置 LLM API 密钥。</li>\n        <li>答案来自 AI，结果仅供参考。</li>\n      </ul>\n\n      <h4>AI 解答</h4>\n      <ol>\n        <li>点击设置（<i class="fas fa-cog"></i>）填入 API Key。</li>\n        <li>每个 AI Profile 可单独设置 Temperature（0–2）；留空时使用模型默认值，不会发送该参数。</li>\n        <li>点击 AI 解答（<i class="fas fa-robot"></i>）后会对“当前题目/最近遇到的题目”询问并解析。</li>\n      </ol>\n\n      <h4>课堂提醒、手机版与亮屏</h4>\n      <ul>\n        <li>设置中可以分别控制新题、题组发布、课件发布、其他发布、下课以及自动作答的每个阶段；系统通知、页面弹窗和提示音也可单独关闭。</li>\n        <li>打开或翻阅旧课件不会触发课件发布提醒；发布类提醒只提示，不会自动作答或提交。</li>\n        <li>手机进入 <code>/m/v2</code> 时会使用“仅提醒”模式，点击右下角铃铛即可设置提醒和亮屏，不会启动自动作答。</li>\n        <li>系统通知需由浏览器或篡改猴授予权限；脚本不会自动请求或修改系统通知权限。</li>\n        <li>“课堂保持亮屏”仅在可见的课堂页防止自动熄屏，无法阻止手动锁屏、后台冻结或系统省电策略。</li>\n      </ul>\n\n      <h4>注意事项</h4>\n      <p>1) 仅供学习参考，请独立思考；</p>\n      <p>2) 合理使用 API 额度；</p>\n      <p>3) 答案不保证 100% 正确；</p>\n      <p>4) 自动作答有一定风险，谨慎开启。</p>\n\n      <h4>联系方式</h4>\n      <ul>\n        <li>请在<a href="https://github.com/ZaytsevZY/yuketang-helper-auto/issues" target="_blank" rel="noopener">GitHub Issues</a>提出问题</li>\n      </ul>\n    </div>\n  </div>\n</div>\n';
+  var tpl = '<div id="ykt-tutorial-panel" class="ykt-panel">\n  <div class="panel-header">\n    <h3>雨课堂助手使用教程</h3>\n    <span class="close-btn" id="ykt-tutorial-close"><i class="fas fa-times"></i></span>\n  </div>\n\n  <div class="panel-body">\n    <div class="tutorial-content">\n      <h4>工具版本</h4>\n      <p>1.21.3</p>\n\n      <h4>功能介绍</h4>\n      <p>AI雨课堂助手是一个为雨课堂提供辅助功能的工具，可以帮助你更好地参与课堂互动。</p>\n      <p>项目仓库：<a href="https://github.com/ZaytsevZY/yuketang-helper-auto" target="_blank" rel="noopener">GitHub</a></p>\n      <p>脚本安装：<a href="https://greasyfork.org/zh-CN/scripts/531469-ai%E9%9B%A8%E8%AF%BE%E5%A0%82%E5%8A%A9%E6%89%8B-%E6%A8%A1%E5%9D%97%E5%8C%96%E6%9E%84%E5%BB%BA%E7%89%88" target="_blank" rel="noopener">GreasyFork</a></p>\n\n      <h4>工具栏按钮说明</h4>\n      <ul>\n        <li><i class="fas fa-bell"></i> <b>习题提醒</b>：切换是否在新习题出现时显示通知提示（蓝色=开启）。</li>\n        <li><i class="fas fa-file-powerpoint"></i> <b>课件浏览</b>：查看课件与题目页面，提问可见内容。</li>\n        <li><i class="fas fa-robot"></i> <b>AI 解答</b>：向 AI 询问当前题目并显示建议答案。</li>\n        <li><i class="fas fa-magic-wand-sparkles"></i> <b>自动作答</b>：切换自动作答（蓝色=开启）。</li>\n        <li><i class="fas fa-cog"></i> <b>设置</b>：配置 API 密钥与自动作答参数。</li>\n        <li><i class="fas fa-question-circle"></i> <b>使用教程</b>：显示/隐藏当前教程页面。</li>\n      </ul>\n\n      <h4>自动作答</h4>\n      <ul>\n        <li>在设置中开启自动作答并配置延迟/随机延迟。</li>\n        <li>需要配置 LLM API 密钥。</li>\n        <li>答案来自 AI，结果仅供参考。</li>\n      </ul>\n\n      <h4>AI 解答</h4>\n      <ol>\n        <li>点击设置（<i class="fas fa-cog"></i>）填入 API Key。</li>\n        <li>每个 AI Profile 可单独设置 Temperature（0–2）；留空时使用模型默认值，不会发送该参数。</li>\n        <li>点击 AI 解答（<i class="fas fa-robot"></i>）后会对“当前题目/最近遇到的题目”询问并解析。</li>\n      </ol>\n\n      <h4>课堂提醒、手机版与亮屏</h4>\n      <ul>\n        <li>设置中可以分别控制新题、题组发布、课件发布、其他发布、下课以及自动作答的每个阶段；系统通知、页面弹窗和提示音也可单独关闭。</li>\n        <li>打开或翻阅旧课件不会触发课件发布提醒；携带具体题目 ID 的新题发布可进入自动作答队列，题组、考试、测试等发布只提醒。</li>\n        <li>手机进入 <code>/m/v2</code> 时会使用“仅提醒”模式，点击右下角铃铛即可设置提醒和亮屏，不会启动自动作答。</li>\n        <li>系统通知需由浏览器或篡改猴授予权限；脚本不会自动请求或修改系统通知权限。</li>\n        <li>“课堂保持亮屏”仅在可见的课堂页防止自动熄屏，无法阻止手动锁屏、后台冻结或系统省电策略。</li>\n      </ul>\n\n      <h4>注意事项</h4>\n      <p>1) 仅供学习参考，请独立思考；</p>\n      <p>2) 合理使用 API 额度；</p>\n      <p>3) 答案不保证 100% 正确；</p>\n      <p>4) 自动作答有一定风险，谨慎开启。</p>\n\n      <h4>联系方式</h4>\n      <ul>\n        <li>请在<a href="https://github.com/ZaytsevZY/yuketang-helper-auto/issues" target="_blank" rel="noopener">GitHub Issues</a>提出问题</li>\n      </ul>\n    </div>\n  </div>\n</div>\n';
   let mounted$1 = false;
   let root$1;
   function $(sel) {
@@ -4550,7 +4670,9 @@
   const COURSEWARE_PUBLISH_ACTION = /^(send|publish|release)/;
   const ASSESSMENT_PUBLISH_ACTION = /^(send|publish|start|release)/;
   const ENTITY_KEYS = [ "quiz", "exam", "test", "exercise", "paper", "problemGroup", "problem_group", "problem", "presentation", "courseware", "activity" ];
-  const NESTED_PAYLOAD_KEYS = [ "data", "payload", "result", "content" ];
+  const NESTED_VALUE_KEYS = [ "problem", "data", "payload", "result", "content" ];
+  const ASSESSMENT_GROUP_KEYS = [ "quiz", "exam", "test", "exercise", "paper", "problemGroup", "problem_group", "problemgroup" ];
+  const CONCRETE_PROBLEM_ID_KEYS = [ "problemid", "problemId", "problem_id", "prob" ];
   function normalizeOp(message) {
     return String(message?.op || message?.type || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
   }
@@ -4569,7 +4691,7 @@
         const entity = current[key];
         if (entity && typeof entity === "object") return entity;
       }
-      for (const key of NESTED_PAYLOAD_KEYS) {
+      for (const key of NESTED_VALUE_KEYS) {
         const nested = current[key];
         if (nested && typeof nested === "object") {
           fallback = nested;
@@ -4587,6 +4709,84 @@
     }
     return "";
   }
+  function findNestedValue(source, keys) {
+    const queue = [ source ];
+    const visited = new Set;
+    while (queue.length) {
+      const current = queue.shift();
+      if (!current || typeof current !== "object" || visited.has(current)) continue;
+      visited.add(current);
+      for (const key of keys) {
+        if (!Object.prototype.hasOwnProperty.call(current, key)) continue;
+        const value = current[key];
+        if (value !== void 0 && value !== null) return value;
+      }
+      for (const key of NESTED_VALUE_KEYS) {
+        const nested = current[key];
+        if (Array.isArray(nested)) queue.push(...nested); else if (nested && typeof nested === "object") queue.push(nested);
+      }
+    }
+    return;
+  }
+  function hasAssessmentGroup(message) {
+    const group = findNestedValue(message, ASSESSMENT_GROUP_KEYS);
+    return group !== void 0 && group !== null;
+  }
+  function findProblemValue(message, keys) {
+    const problem = findNestedValue(message, [ "problem" ]);
+    if (problem && typeof problem === "object") {
+      const value = findNestedValue(problem, keys);
+      if (value !== void 0) return value;
+    }
+    return findNestedValue(message, keys);
+  }
+  function scalarString(value) {
+    if (value == null || typeof value === "object") return null;
+    const text = String(value).trim();
+    return text || null;
+  }
+  function getConcreteProblemId(message) {
+    const problem = findNestedValue(message, [ "problem" ]);
+    if (problem && typeof problem === "object") {
+      const id = firstText(problem, [ "problemId", "problem_id", "problemid", "id", "uuid" ]);
+      if (id) return id;
+    }
+    const explicitId = findNestedValue(message, CONCRETE_PROBLEM_ID_KEYS);
+    if (explicitId !== void 0 && explicitId !== null && typeof explicitId !== "object") {
+      const id = String(explicitId).trim();
+      if (id) return id;
+    }
+    if (problem && typeof problem !== "object") {
+      const id = String(problem).trim();
+      if (id) return id;
+    }
+    return "";
+  }
+  function getConcreteProblemMetadata(message, op) {
+    if (op.includes("problemgroup")) return null;
+    if (op !== "publishproblem" && op !== "sendproblem") return null;
+    // A message containing a quiz/exam/test/... entity is a group publication.
+    // Even if it also carries a problem id, auto-answer must stay disabled.
+        if (hasAssessmentGroup(message)) return null;
+    const problem = findNestedValue(message, [ "problem" ]);
+    const explicitId = findNestedValue(message, CONCRETE_PROBLEM_ID_KEYS);
+    if (problem === void 0 && explicitId === void 0) return null;
+    const problemId = getConcreteProblemId(message);
+    if (!problemId) return null;
+    const slideId = scalarString(findProblemValue(message, [ "sid", "slideId", "slide_id" ]));
+    const presentationId = scalarString(findProblemValue(message, [ "pres", "presentationId", "presentation_id" ]));
+    const startTime = findProblemValue(message, [ "dt", "startTime", "start_time" ]);
+    const limit = findProblemValue(message, [ "limit", "duration" ]);
+    const metadata = {
+      problemId: problemId,
+      autoAnswerCandidate: true
+    };
+    if (slideId) metadata.slideId = slideId;
+    if (presentationId) metadata.presentationId = presentationId;
+    if (startTime !== void 0 && startTime !== null && typeof startTime !== "object") metadata.startTime = startTime;
+    if (limit !== void 0 && limit !== null && typeof limit !== "object") metadata.limit = limit;
+    return metadata;
+  }
   const IDENTIFIER_KEYS = [ "id", "uuid", "quizId", "quiz_id", "examId", "exam_id", "testId", "test_id", "exerciseId", "exercise_id", "presentationId", "presentation_id", "problemId", "problem_id", "problemid", "problem", "presentation", "activityId", "activity_id" ];
   function findNestedText(source, keys) {
     const queue = [ source ];
@@ -4597,7 +4797,7 @@
       visited.add(current);
       const value = firstText(current, keys);
       if (value) return value;
-      for (const key of NESTED_PAYLOAD_KEYS) {
+      for (const key of NESTED_VALUE_KEYS) {
         const nested = current[key];
         if (Array.isArray(nested)) queue.push(...nested); else if (nested && typeof nested === "object") queue.push(nested);
       }
@@ -4625,10 +4825,11 @@
     const category = getCategory(op);
     if (!category) return null;
     const entity = getEntity(message);
-    const id = getIdentifier(message, entity, op);
+    const concreteProblem = category === "assessment" ? getConcreteProblemMetadata(message, op) : null;
+    const id = concreteProblem?.problemId || getIdentifier(message, entity, op);
     const detail = getDetail(message, entity);
     const title = {
-      assessment: "考试/测试题组已发布",
+      assessment: concreteProblem ? "新题目已发布" : "考试/测试题组已发布",
       courseware: "课件已发布",
       other: "课堂内容已发布"
     }[category];
@@ -4636,7 +4837,8 @@
       category: category,
       dedupeKey: `${category}:${id}`,
       title: title,
-      detail: detail
+      detail: detail,
+      ...concreteProblem
     };
   }
   function isPublishReminderEnabled(event, config = {}) {
@@ -4744,11 +4946,93 @@
     const [title, defaultDetail] = AUTO_ANSWER_EVENT_META[kind] || [ "自动作答提示", "自动作答状态发生变化。" ];
     return ui.notifyClassroomEvent({
       kind: kind,
-      dedupeKey: `${kind}:${problem?.problemId || Date.now()}`,
+      dedupeKey: `${kind}:${problem?.problemId ?? problem?.id ?? Date.now()}`,
       title: title,
       detail: detail || defaultDetail,
       problem: problem
     });
+  }
+  const pendingAutoAnswers = new Map;
+  function autoAnswerKey(value) {
+    const key = String(value ?? "").trim();
+    return key || null;
+  }
+  function findPublishedProblemSlide(event) {
+    const direct = repo.getSlide(event?.slideId);
+    const problemId = autoAnswerKey(event?.problemId);
+    if (direct) {
+      const directProblemId = autoAnswerKey(direct?.problem?.problemId ?? direct?.problem?.id);
+      if (!directProblemId || directProblemId === problemId) return direct;
+    }
+    if (!problemId) return null;
+    for (const slide of repo.slides.values()) {
+      const slideProblemId = slide?.problem?.problemId ?? slide?.problem?.id;
+      if (autoAnswerKey(slideProblemId) === problemId) return slide;
+    }
+    for (const [presentationId, presentation] of repo.presentations) for (const slide of Array.isArray(presentation?.slides) ? presentation.slides : []) {
+      const slideProblemId = slide?.problem?.problemId ?? slide?.problem?.id;
+      if (autoAnswerKey(slideProblemId) !== problemId) continue;
+      const found = slide.presentationId == null ? {
+        ...slide,
+        presentationId: presentationId
+      } : slide;
+      repo.upsertSlide(found);
+      repo.upsertProblem(slide.problem);
+      return found;
+    }
+    return null;
+  }
+  function scheduleAutoAnswer(problem, status) {
+    if (!ui.config.autoAnswer || !problem || problem.result || status.done || status.answering || Number.isFinite(status.autoAnswerTime) || isDeadlineReached(status.endTime)) return null;
+    const base = Math.max(0, Number(ui.config.autoAnswerDelay) || 0);
+    const random = Math.max(0, Number(ui.config.autoAnswerRandomDelay) || 0);
+    const delay = base + (random ? Math.floor(Math.random() * (random + 1)) : 0);
+    status.autoAnswerTime = Date.now() + delay;
+    notifyAutoAnswer("auto-answer-scheduled", problem, `将在约 ${Math.floor(delay / 1e3)} 秒后开始自动作答。`);
+    return delay;
+  }
+  function processPendingAutoAnswers() {
+    for (const [problemId, event] of pendingAutoAnswers) {
+      const slide = findPublishedProblemSlide(event);
+      const candidate = repo.getProblem(problemId) || slide?.problem;
+      if (!candidate || !slide) continue;
+      repo.upsertSlide(slide);
+      repo.upsertProblem(candidate);
+      const problem = repo.getProblem(problemId) || {
+        ...candidate,
+        problemId: problemId
+      };
+      const status = repo.getProblemStatus(problemId) || {};
+      status.presentationId ??= event.presentationId ?? slide.presentationId;
+      status.slideId ??= event.slideId ?? slide.id ?? slide.slideId;
+      status.startTime ??= event.startTime;
+      const deadline = deadlineFromLimit(event.startTime, event.limit);
+      if (Number.isFinite(deadline)) status.endTime ??= deadline;
+      status.done ??= !!problem.result;
+      status.autoAnswerTime ??= null;
+      status.answering ??= false;
+      repo.setProblemStatus(problemId, status);
+      const scheduled = scheduleAutoAnswer(problem, status);
+      pendingAutoAnswers.delete(problemId);
+      if (scheduled !== null) console.log("[雨课堂助手][INFO][Publish] 新题已加入自动作答队列:", problemId);
+    }
+  }
+  function tickAutoAnswers() {
+    processPendingAutoAnswers();
+    const now = Date.now();
+    for (const [problemId, status] of repo.problemStatus) {
+      if (!status || typeof status !== "object") continue;
+      const problem = repo.getProblem(problemId);
+      if (status.done || problem?.result || isDeadlineReached(status.endTime)) {
+        status.autoAnswerTime = null;
+        continue;
+      }
+      if (!Number.isFinite(status.autoAnswerTime) || now < status.autoAnswerTime) continue;
+      const slide = repo.getSlide(status.slideId);
+      if (!problem || !slide) continue;
+      status.autoAnswerTime = null;
+      void handleAutoAnswerInternal(problem);
+    }
   }
   // 无AI默认答案生成
     function makeDefaultAnswer(problem) {
@@ -4791,7 +5075,13 @@
   }
   // 融合模式自动答题
     async function handleAutoAnswerInternal(problem) {
-    const status = repo.problemStatus.get(problem.problemId);
+    const problemId = autoAnswerKey(problem?.problemId ?? problem?.id);
+    if (!problemId) return;
+    problem = problem?.problemId === problemId ? problem : {
+      ...problem,
+      problemId: problemId
+    };
+    const status = repo.getProblemStatus(problemId);
     if (!status || status.answering || problem.result) {
       console.log("[AutoAnswer] 跳过：", {
         hasStatus: !!status,
@@ -4800,7 +5090,7 @@
       });
       return;
     }
-    if (Date.now() >= status.endTime) {
+    if (isDeadlineReached(status.endTime)) {
       console.log("[雨课堂助手][WARN][AutoAnswer] 跳过：已超时");
       return;
     }
@@ -4821,10 +5111,11 @@
           startTime: status.startTime,
           endTime: status.endTime,
           forceRetry: false,
-          lessonId: repo.currentLessonId
+          lessonId: repo.currentLessonId,
+          autoGate: false
         });
         // 更新状态与UI
-                actions.onAnswerProblem(problem.problemId, parsed);
+                actions.onAnswerProblem(problemId, parsed);
         status.done = true;
         status.answering = false;
         notifyAutoAnswer("auto-answer-succeeded", problem, "这道题已使用本地默认答案提交。");
@@ -4874,11 +5165,12 @@
         startTime: status.startTime,
         endTime: status.endTime,
         forceRetry: false,
-        lessonId: repo.currentLessonId
+        lessonId: repo.currentLessonId,
+        autoGate: false
       });
       console.log("[雨课堂助手][INFO][AutoAnswer] 提交成功");
       // 更新状态
-            actions.onAnswerProblem(problem.problemId, parsed);
+            actions.onAnswerProblem(problemId, parsed);
       status.done = true;
       status.answering = false;
       notifyAutoAnswer("auto-answer-succeeded", problem);
@@ -4892,6 +5184,11 @@
       ui.toast(`自动作答失败: ${e.message}`, 4e3);
     }
   }
+  function startAutoAnswerLoop() {
+    if (_autoLoopStarted) return;
+    _autoLoopStarted = true;
+    setInterval(tickAutoAnswers, 500);
+  }
   const actions = {
     onFetchTimeline(timeline, options = {}) {
       for (const piece of Array.isArray(timeline) ? timeline : []) if (piece?.type === "problem") this.onUnlockProblem(piece, options);
@@ -4899,7 +5196,8 @@
     onPresentationLoaded(id, data) {
       repo.setPresentation(id, data);
       const pres = repo.presentations.get(id);
-      for (const slide of pres.slides) {
+      const slides = Array.isArray(pres?.slides) ? pres.slides : [];
+      for (const slide of slides) {
         repo.upsertSlide(slide);
         if (slide.problem) {
           repo.upsertProblem(slide.problem);
@@ -4910,48 +5208,38 @@
     },
     onUnlockProblem(data, {notificationOnly: notificationOnly = false} = {}) {
       const payload = data && typeof data === "object" ? data : {};
-      const problemId = firstValue(payload.prob, payload.problemId, payload.problemid, payload.problem?.problemId, payload.problem?.id, payload.id);
-      const slideId = firstValue(payload.sid, payload.slideId, payload.slide?.id);
-      const problem = repo.problems.get(problemId);
-      const slide = repo.slides.get(slideId);
-      if (!problem || !slide) {
-        if (notificationOnly) return notifyProblemStart(payload, problem, slide);
-        console.log("[雨课堂助手][ERR][onUnlockProblem] 题目或幻灯片不存在");
-        return false;
-      }
-      console.log("[雨课堂助手][DBG][onUnlockProblem] 题目解锁");
-      console.log("[雨课堂助手][DBG][onUnlockProblem] 题目ID:", problemId);
-      console.log("[雨课堂助手][DBG][onUnlockProblem] 幻灯片ID:", slideId);
-      console.log("[雨课堂助手][DBG][onUnlockProblem] 课件ID:", payload.pres);
-      const status = {
-        presentationId: payload.pres,
-        slideId: slideId,
-        startTime: payload.dt,
-        endTime: payload.dt + 1e3 * payload.limit,
-        done: !!problem.result,
-        autoAnswerTime: null,
-        answering: false
-      };
-      repo.problemStatus.set(problemId, status);
-      if (Date.now() > status.endTime || problem.result) {
-        console.log("[雨课堂助手][WARN][onUnlockProblem] 题目已过期或已作答，跳过");
-        return;
-      }
+      const problemId = autoAnswerKey(firstValue(payload.prob, payload.problemId, payload.problemid, payload.problem?.problemId, payload.problem?.id, payload.id));
+      const slideId = autoAnswerKey(firstValue(payload.sid, payload.slideId, payload.slide?.id));
+      const embeddedProblem = payload.problem && typeof payload.problem === "object" ? payload.problem : null;
+      const embeddedSlide = payload.slide && typeof payload.slide === "object" ? payload.slide : null;
+      if (embeddedProblem) repo.upsertProblem(embeddedProblem);
+      if (embeddedSlide) repo.upsertSlide(embeddedSlide);
+      const problem = repo.getProblem(problemId) || embeddedProblem;
+      const slide = repo.getSlide(slideId) || embeddedSlide;
       const notified = notifyProblemStart(payload, problem, slide);
-      if (notificationOnly) return notified;
-      if (ui.config.autoAnswer) {
-        const delay = ui.config.autoAnswerDelay + randInt(0, ui.config.autoAnswerRandomDelay);
-        status.autoAnswerTime = Date.now() + delay;
-        console.log(`[雨课堂助手][INFO][onUnlockProblem] 将在 ${Math.floor(delay / 1e3)} 秒后自动作答`);
-        ui.toast(`将在 ${Math.floor(delay / 1e3)} 秒后使用融合模式自动作答`, 3e3);
-        notifyAutoAnswer("auto-answer-scheduled", problem, `将在约 ${Math.floor(delay / 1e3)} 秒后开始自动作答。`);
+      if (!notificationOnly && ui.config.autoAnswer && problemId) {
+        pendingAutoAnswers.set(problemId, {
+          problemId: problemId,
+          slideId: slideId,
+          presentationId: autoAnswerKey(firstValue(payload.pres, payload.presentationId, payload.presentation?.id)),
+          startTime: firstValue(payload.dt, payload.startTime, payload.start_time),
+          limit: firstValue(payload.limit, payload.duration),
+          autoAnswerCandidate: true
+        });
+        processPendingAutoAnswers();
+        ui.updateActiveProblems?.();
       }
-      ui.updateActiveProblems();
       return notified;
     },
-    onPublishEvent(event) {
+    onPublishEvent(event, {notificationOnly: notificationOnly = false} = {}) {
       const notified = publishReminder.handle(event, ui.config);
       if (notified) console.log("[雨课堂助手][INFO][Publish] 已提醒发布事件:", event.category, event.dedupeKey);
+      const problemId = autoAnswerKey(event?.problemId);
+      if (!notificationOnly && ui.config.autoAnswer && event?.autoAnswerCandidate && problemId) {
+        pendingAutoAnswers.set(problemId, event);
+        processPendingAutoAnswers();
+        ui.updateActiveProblems?.();
+      }
       return notified;
     },
     onLessonFinished() {
@@ -4963,34 +5251,28 @@
       });
     },
     onAnswerProblem(problemId, result) {
-      const p = repo.problems.get(problemId);
-      if (p) {
-        p.result = result;
-        const i = repo.encounteredProblems.findIndex(e => e.problemId === problemId);
-        if (i !== -1) repo.encounteredProblems[i].result = result;
-        ui.updateProblemList();
-      }
+      const key = autoAnswerKey(problemId);
+      const p = repo.getProblem(key);
+      if (!p) return;
+      p.result = result;
+      const i = repo.encounteredProblems.findIndex(entry => autoAnswerKey(entry.problemId) === key);
+      if (i !== -1) repo.encounteredProblems[i].result = result;
+      ui.updateProblemList();
     },
     async handleAutoAnswer(problem) {
       return handleAutoAnswerInternal(problem);
     },
     tickAutoAnswer() {
-      const now = Date.now();
-      for (const [pid, status] of repo.problemStatus) if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
-        const p = repo.problems.get(pid);
-        if (p) {
-          status.autoAnswerTime = null;
-          this.handleAutoAnswer(p);
-        }
-      }
+      return tickAutoAnswers();
     },
     async submit(problem, content) {
       const result = this.parseManual(problem.problemType, content);
+      const pid = problem.problemId ?? problem.id;
       await submitAnswer(problem, result, {
         lessonId: repo.currentLessonId,
         autoGate: false
       });
-      this.onAnswerProblem(problem.problemId, result);
+      this.onAnswerProblem(pid, result);
     },
     parseManual(problemType, content) {
       switch (problemType) {
@@ -5034,20 +5316,7 @@
       void screenWakeLock.setEnabled(ui.config.keepScreenAwake);
     },
     startAutoAnswerLoop() {
-      if (_autoLoopStarted) return;
-      _autoLoopStarted = true;
-      setInterval(() => {
-        const now = Date.now();
-        repo.problemStatus.forEach((status, pid) => {
-          if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
-            const problem = repo.problems.get(pid);
-            if (problem && !problem.result) {
-              status.autoAnswerTime = null;
-              handleAutoAnswerInternal(problem);
-            }
-          }
-        });
-      }, 500);
+      return startAutoAnswerLoop();
     },
     // 自动进入课堂
     startAutoJoinLoop() {
@@ -5104,7 +5373,7 @@
     installRouterRearm() {
       if (_routerHooked) return;
       _routerHooked = true;
-      const uw = gm && gm.uw ? gm.uw : window.unsafeWindow || window;
+      const uw = gm?.uw || window.unsafeWindow || window;
       const rearm = () => {
         // 重置一次“onlesson 点击守卫”的进行中标记，避免被卡住
         _autoOnLessonClickInProgress = false;
@@ -5135,7 +5404,7 @@
       _autoOnLessonClickStarted = true;
       // 仅在非课堂页（首页/课表页等）生效
             if (/\/lesson\//.test(location.pathname)) return;
-      const uw = gm && gm.uw ? gm.uw : window.unsafeWindow || window;
+      const uw = gm?.uw || window.unsafeWindow || window;
       async function tryApiJumpFirst() {
         if (_autoOnLessonClickInProgress) return false;
         _autoOnLessonClickInProgress = true;
@@ -5503,7 +5772,7 @@
         };
     console.log("[雨课堂助手][INFO][fetch-interceptor] fetch() 已被拦截");
   })();
-  var css = '/* ===== 通用 & 修复 ===== */\n#watermark_layer { display: none !important; visibility: hidden !important; }\n.hidden { display: none !important; }\n\n:root{\n  --ykt-z: 10000000;\n  --ykt-border: #ddd;\n  --ykt-border-strong: #ccc;\n  --ykt-bg: #fff;\n  --ykt-fg: #222;\n  --ykt-muted: #607190;\n  --ykt-accent: #1d63df;\n  --ykt-hover: #1e3050;\n  --ykt-shadow: 0 10px 30px rgba(0,0,0,.18);\n}\n\n/* ===== 工具栏 ===== */\n#ykt-helper-toolbar{\n  position: fixed; z-index: calc(var(--ykt-z) + 1);\n  left: 15px; bottom: 15px;\n  /* 移除固定宽度，让内容自适应 */\n  height: 36px; padding: 5px;\n  display: flex; gap: 6px; align-items: center;\n  background: var(--ykt-bg);\n  border: 1px solid var(--ykt-border-strong);\n  border-radius: 4px;\n  box-shadow: 0 1px 4px 3px rgba(0,0,0,.1);\n}\n\n#ykt-helper-toolbar .btn{\n  display: inline-block; padding: 4px; cursor: pointer;\n  color: var(--ykt-muted); line-height: 1;\n}\n#ykt-helper-toolbar .btn:hover{ color: var(--ykt-hover); }\n#ykt-helper-toolbar .btn.active{ color: var(--ykt-accent); }\n\n/* ===== 面板通用样式 ===== */\n.ykt-panel{\n  position: fixed; right: 20px; bottom: 60px;\n  width: 560px; max-height: 72vh; overflow: auto;\n  background: var(--ykt-bg); color: var(--ykt-fg);\n  border: 1px solid var(--ykt-border-strong); border-radius: 8px;\n  box-shadow: var(--ykt-shadow);\n  display: none; \n  /* 提高z-index，确保后打开的面板在最上层 */\n  z-index: var(--ykt-z);\n}\n.ykt-panel.visible{ \n  display: block; \n  /* 动态提升z-index */\n  z-index: calc(var(--ykt-z) + 10);\n}\n\n.panel-header{\n  display: flex; align-items: center; justify-content: space-between;\n  gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--ykt-border);\n}\n.panel-header h3{ margin: 0; font-size: 16px; font-weight: 600; }\n.panel-body{ padding: 10px 12px; }\n.close-btn{ cursor: pointer; color: var(--ykt-muted); }\n.close-btn:hover{ color: var(--ykt-hover); }\n\n/* ===== 设置面板 (#ykt-settings-panel) ===== */\n#ykt-settings-panel .settings-content{ display: flex; flex-direction: column; gap: 14px; }\n#ykt-settings-panel .setting-group{ border: 1px dashed var(--ykt-border); border-radius: 6px; padding: 10px; }\n#ykt-settings-panel .setting-group h4{ margin: 0 0 8px 0; font-size: 14px; }\n#ykt-settings-panel .setting-item{ display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }\n#ykt-settings-panel label{ font-size: 13px; }\n#ykt-settings-panel input[type="text"],\n#ykt-settings-panel input[type="number"]{\n  height: 30px; border: 1px solid var(--ykt-border-strong);\n  border-radius: 4px; padding: 0 8px; min-width: 220px;\n}\n#ykt-settings-panel small{ color: #666; }\n#ykt-settings-panel .setting-actions{ display: flex; gap: 8px; margin-top: 6px; }\n#ykt-settings-panel button{\n  height: 30px; padding: 0 12px; border-radius: 6px;\n  border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\n}\n#ykt-settings-panel button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\n\n/* 自定义复选框（与手写脚本一致的视觉语义） */\n#ykt-settings-panel .checkbox-label{ position: relative; padding-left: 26px; cursor: pointer; user-select: none; }\n#ykt-settings-panel .checkbox-label input{ position: absolute; opacity: 0; cursor: pointer; height: 0; width: 0; }\n#ykt-settings-panel .checkbox-label .checkmark{\n  position: absolute; left: 0; top: 50%; transform: translateY(-50%);\n  height: 16px; width: 16px; border:1px solid var(--ykt-border-strong); border-radius: 3px; background: #fff;\n}\n#ykt-settings-panel .checkbox-label input:checked ~ .checkmark{\n  background: var(--ykt-accent); border-color: var(--ykt-accent);\n}\n#ykt-settings-panel .checkbox-label .checkmark:after{\n  content: ""; position: absolute; display: none;\n  left: 5px; top: 1px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);\n}\n#ykt-settings-panel .checkbox-label input:checked ~ .checkmark:after{ display: block; }\n\n/* ===== AI 解答面板 (#ykt-ai-answer-panel) ===== */\n#ykt-ai-answer-panel .ai-question{\n  white-space: pre-wrap; background: #fafafa; border: 1px solid var(--ykt-border);\n  padding: 8px; border-radius: 6px; margin-bottom: 8px; max-height: 160px; overflow: auto;\n}\n#ykt-ai-answer-panel .ai-loading{ color: var(--ykt-accent); margin-bottom: 6px; }\n#ykt-ai-answer-panel .ai-error{ color: #b00020; margin-bottom: 6px; }\n#ykt-ai-answer-panel .ai-answer{ white-space: pre-wrap; margin-top: 4px; }\n#ykt-ai-answer-panel .ai-actions{ margin-top: 10px; }\n#ykt-ai-answer-panel .ai-actions button{\n  height: 30px; padding: 0 12px; border-radius: 6px;\n  border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\n}\n#ykt-ai-answer-panel .ai-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\n\n/* ===== 课件浏览面板 (#ykt-presentation-panel) ===== */\n#ykt-presentation-panel{ width: 900px; }\n#ykt-presentation-panel .panel-controls{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }\n#ykt-presentation-panel .panel-body{\n  display: grid; grid-template-columns: 300px 1fr; gap: 10px;\n}\n#ykt-presentation-panel .panel-left,\n#ykt-presentation-panel .panel-right{\n  display: flex;\n  flex-direction: column;\n}\n#ykt-presentation-panel .presentation-list{\n  border: 1px solid var(--ykt-border);\n  border-radius: 8px;\n  background: #fff;\n  padding: 10px;\n  box-sizing: border-box;\n}\n#ykt-presentation-panel .presentation-title{\n  font-weight: 600; padding: 6px 0; border-bottom: 1px solid var(--ykt-border);\n}\n#ykt-presentation-panel .slide-thumb-list{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }\n#ykt-presentation-panel .slide-thumb{\n  position: relative; border: 1px solid var(--ykt-border); border-radius: 6px; background: #fafafa;\n  min-height: 60px; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 4px; text-align: center;\n}\n#ykt-presentation-panel .slide-thumb:hover{ border-color: var(--ykt-accent); background: #eef3ff; }\n#ykt-presentation-panel .slide-thumb img{ max-width: 100%; max-height: 120px; object-fit: contain; display: block; }\n.ykt-presentation-panel .slide-index {\n  position: absolute; top: 4px; left: 4px; z-index: 2;               \n  padding: 2px 6px; border-radius: 4px; font-size: 12px; line-height: 1;\n  background: rgba(0, 0, 0, 0.6); color: #fff; pointer-events: none;\n}\n#ykt-presentation-panel .slide-view{\n  position: relative; border: 1px solid var(--ykt-border); border-radius: 8px; min-height: 360px; background: #fff; overflow: hidden;\n}\n#ykt-presentation-panel .slide-cover{ display: flex; align-items: center; justify-content: center; min-height: 360px; }\n#ykt-presentation-panel .slide-cover img{ max-width: 100%; max-height: 100%; object-fit: contain; display: block; }\n#ykt-presentation-panel .ocr-panel{\n  margin-top: 12px;\n  border: 1px solid var(--ykt-border);\n  border-radius: 8px;\n  background: #fff;\n  padding: 12px;\n}\n#ykt-presentation-panel .ocr-head{\n  display: flex;\n  align-items: center;\n  justify-content: space-between;\n  gap: 8px;\n  margin-bottom: 8px;\n  font-weight: 600;\n}\n#ykt-presentation-panel .ocr-status{\n  font-size: 12px;\n  color: var(--ykt-muted);\n}\n#ykt-presentation-panel .ocr-status.is-loading{ color: #a16207; }\n#ykt-presentation-panel .ocr-status.is-error{ color: #b42318; }\n#ykt-presentation-panel .ocr-status.is-success{ color: #027a48; }\n#ykt-presentation-panel .ocr-tip{\n  margin-bottom: 8px;\n  font-size: 12px;\n  color: var(--ykt-muted);\n}\n#ykt-presentation-panel .ocr-translate-bar{\n  display: flex;\n  align-items: center;\n  gap: 8px;\n  flex-wrap: wrap;\n  margin: 12px 0 8px;\n}\n#ykt-presentation-panel .ocr-translate-bar .ocr-status{\n  margin-left: auto;\n}\n#ykt-presentation-panel .ocr-target-input{\n  min-width: 220px;\n  height: 32px;\n  border: 1px solid var(--ykt-border-strong);\n  border-radius: 6px;\n  padding: 0 10px;\n  box-sizing: border-box;\n}\n#ykt-presentation-panel .ocr-subhead{\n  margin-top: 4px;\n}\n#ykt-presentation-panel .ocr-result{\n  width: 100%;\n  min-height: 180px;\n  resize: vertical;\n  border: 1px solid var(--ykt-border-strong);\n  border-radius: 6px;\n  padding: 10px;\n  line-height: 1.5;\n  font-size: 13px;\n  box-sizing: border-box;\n  background: #fafafa;\n}\n\n#ykt-presentation-panel .problem-box{\n  position: absolute; left: 12px; right: 12px; bottom: 12px;\n  background: rgba(255,255,255,.96); border: 1px solid var(--ykt-border);\n  border-radius: 8px; padding: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.12);\n}\n#ykt-presentation-panel .problem-head{ font-weight: 600; margin-bottom: 6px; padding-right: 28px; }\n#ykt-presentation-panel .problem-box-close{\n  position: absolute; top: 6px; right: 6px;\n  width: 22px; height: 22px; border-radius: 999px;\n  border: 1px solid var(--ykt-border-strong);\n  background: #fff; color: #555;\n  cursor: pointer; font-size: 16px; line-height: 18px;\n  padding: 0;\n}\n#ykt-presentation-panel .problem-box-close:hover{ color: #111; border-color: var(--ykt-accent); }\n#ykt-presentation-panel .problem-options{ display: grid; grid-template-columns: 1fr; gap: 4px; }\n#ykt-presentation-panel .problem-option{ padding: 6px 8px; border: 1px solid var(--ykt-border); border-radius: 6px; background: #fafafa; }\n\n/* ===== 题目列表面板 (#ykt-problem-list-panel) ===== */\n#ykt-problem-list{ display: flex; flex-direction: column; gap: 10px; }\n#ykt-problem-list .problem-row{\n  border: 1px solid var(--ykt-border); border-radius: 8px; padding: 8px; background: #fafafa;\n}\n#ykt-problem-list .problem-title{ font-weight: 600; margin-bottom: 4px; }\n#ykt-problem-list .problem-meta{ color: #666; font-size: 12px; margin-bottom: 6px; }\n#ykt-problem-list .problem-actions{ display: flex; gap: 8px; align-items: center; }\n#ykt-problem-list .problem-actions button{\n  height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\n}\n#ykt-problem-list .problem-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\n#ykt-problem-list .problem-done{ color: #0a7a2f; font-weight: 600; }\n\n/* ===== 活动题目列表（右下角小卡片） ===== */\n#ykt-active-problems-panel.ykt-active-wrapper{\n  position: fixed; right: 20px; bottom: 60px; z-index: var(--ykt-z);\n}\n#ykt-active-problems{ display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow: auto; }\n#ykt-active-problems .active-problem-card{\n  position: relative;\n  width: 320px; background: #fff; border: 1px solid var(--ykt-border);\n  border-radius: 8px; box-shadow: var(--ykt-shadow); padding: 10px;\n}\n#ykt-active-problems .ap-close{\n  position: absolute; top: 6px; right: 6px;\n  width: 20px; height: 20px; border-radius: 999px;\n  border: 1px solid var(--ykt-border-strong);\n  background: #fff; color: #555;\n  cursor: pointer; padding: 0; font-size: 14px; line-height: 16px;\n}\n#ykt-active-problems .ap-close:hover{ color: #111; border-color: var(--ykt-accent); }\n#ykt-active-problems .ap-title{ font-weight: 600; margin-bottom: 4px; }\n#ykt-active-problems .ap-info{ color: #666; font-size: 12px; margin-bottom: 8px; }\n#ykt-active-problems .ap-actions{ display: flex; gap: 8px; }\n#ykt-active-problems .ap-actions button{\n  height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\n}\n#ykt-active-problems .ap-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\n\n/* ===== 教程面板 (#ykt-tutorial-panel) ===== */\n#ykt-tutorial-panel .tutorial-content h4{ margin: 8px 0 6px; }\n#ykt-tutorial-panel .tutorial-content p,\n#ykt-tutorial-panel .tutorial-content li{ line-height: 1.5; }\n#ykt-tutorial-panel .tutorial-content a{ color: var(--ykt-accent); text-decoration: none; }\n#ykt-tutorial-panel .tutorial-content a:hover{ text-decoration: underline; }\n\n/* ===== 小屏适配 ===== */\n@media (max-width: 1200px){\n  #ykt-presentation-panel{ width: 760px; }\n  #ykt-presentation-panel .panel-body{ grid-template-columns: 260px 1fr; }\n}\n@media (max-width: 900px){\n  .ykt-panel{ right: 12px; left: 12px; width: auto; }\n  #ykt-presentation-panel{ width: auto; }\n  #ykt-presentation-panel .panel-body{ grid-template-columns: 1fr; }\n}\n\n/* ===== 自动作答成功弹窗 ===== */\n.auto-answer-popup{\n  position: fixed; inset: 0; z-index: calc(var(--ykt-z) + 2);\n  background: rgba(0,0,0,.2);\n  display: flex; align-items: flex-end; justify-content: flex-end;\n  opacity: 0; transition: opacity .18s ease;\n}\n.auto-answer-popup.visible{ opacity: 1; }\n\n.auto-answer-popup .popup-content{\n  width: min(560px, 96vw);\n  background: #fff; border: 1px solid var(--ykt-border-strong);\n  border-radius: 10px; box-shadow: var(--ykt-shadow);\n  margin: 16px; overflow: hidden;\n}\n\n.auto-answer-popup .popup-header{\n  display: flex; align-items: center; justify-content: space-between;\n  gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--ykt-border);\n}\n.auto-answer-popup .popup-header h4{ margin: 0; font-size: 16px; }\n.auto-answer-popup .close-btn{ cursor: pointer; color: var(--ykt-muted); }\n.auto-answer-popup .close-btn:hover{ color: var(--ykt-hover); }\n\n.auto-answer-popup .popup-body{ padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }\n.auto-answer-popup .popup-row{ display: grid; grid-template-columns: 56px 1fr; gap: 8px; align-items: start; }\n.auto-answer-popup .label{ color: #666; font-size: 12px; line-height: 1.8; }\n.auto-answer-popup .content{ white-space: normal; word-break: break-word; }\n\n/* ===== 1.16.6: 课件浏览面板：固定右侧详细视图，左侧独立滚动 ===== */\n#ykt-presentation-panel {\n  --ykt-panel-max-h: 72vh;           /* 与 .ykt-panel 的最大高度保持一致 */\n}\n\n/* 两列布局：左列表 + 右详细视图 */\n#ykt-presentation-panel .panel-body{\n  display: grid;\n  grid-template-columns: 300px 1fr;  \n  gap: 12px;\n  overflow: hidden;                  \n  align-items: start;\n}\n\n/* 左侧：只让左列滚动，限制在面板可视高度内 */\n#ykt-presentation-panel .panel-left{\n  max-height: var(--ykt-panel-max-h);\n  overflow: auto;\n  min-width: 0;\n  align-self: stretch;\n}\n\n/* 右侧：粘性定位为“固定”，始终在面板可视区内 */\n#ykt-presentation-panel .panel-right{\n  position: sticky;\n  top: 0;                            \n  align-self: start;\n  gap: 12px;\n}\n\n/* 右侧详细视图自身也限制高度并允许内部滚动 */\n#ykt-presentation-panel .slide-view{\n  max-height: var(--ykt-panel-max-h);\n  overflow: auto;\n  border: 1px solid var(--ykt-border);\n  border-radius: 8px;\n  background: #fff;\n}\n\n/* 小屏自适配：堆叠布局时取消 sticky，避免遮挡 */\n@media (max-width: 900px){\n  #ykt-presentation-panel .panel-body{\n    grid-template-columns: 1fr;\n  }\n  #ykt-presentation-panel .panel-right{\n    position: static;\n  }\n}\n\n/* 在现有样式基础上添加 */\n\n.text-status {\n  font-size: 12px;\n  padding: 4px 8px;\n  border-radius: 4px;\n  margin: 4px 0;\n  display: inline-block;\n}\n\n.text-status.success {\n  background-color: #d4edda;\n  color: #155724;\n  border: 1px solid #c3e6cb;\n}\n\n.text-status.warning {\n  background-color: #fff3cd;\n  color: #856404;\n  border: 1px solid #ffeaa7;\n}\n\n.ykt-question-display {\n  background: #f8f9fa;\n  border: 1px solid #dee2e6;\n  border-radius: 4px;\n  padding: 8px;\n  margin: 4px 0;\n  max-height: 150px;\n  overflow-y: auto;\n  font-family: monospace;\n  font-size: 13px;\n  line-height: 1.4;\n}\n\n/* 在现有样式基础上添加 */\n\n.ykt-custom-prompt {\n  width: 100%;\n  min-height: 60px;\n  padding: 8px;\n  border: 1px solid #ddd;\n  border-radius: 4px;\n  font-family: inherit;\n  font-size: 13px;\n  line-height: 1.4;\n  resize: vertical;\n  background-color: #fff;\n  transition: border-color 0.3s ease;\n}\n\n.ykt-custom-prompt:focus {\n  outline: none;\n  border-color: #007bff;\n  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);\n}\n\n.ykt-custom-prompt::placeholder {\n  color: #999;\n  font-style: italic;\n}\n\n.ykt-custom-prompt:empty::before {\n  content: attr(placeholder);\n  color: #999;\n  font-style: italic;\n  pointer-events: none;\n}\n\n/* 确保输入框在暗色主题下也能正常显示 */\n.ykt-panel.dark .ykt-custom-prompt {\n  background-color: #2d3748;\n  border-color: #4a5568;\n  color: #e2e8f0;\n}\n\n.ykt-panel.dark .ykt-custom-prompt::placeholder {\n  color: #a0aec0;\n}\n\n.ykt-panel.dark .ykt-custom-prompt:focus {\n  border-color: #63b3ed;\n  box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.25);\n}\n\n/* ===== Markdown-like 样式 ===== */\n.ai-answer {\n  white-space: normal;\n  line-height: 1.6;\n  font-size: 14px;\n  color: inherit;\n}\n\n/* 段落和标题间距 */\n.ai-answer p { margin: 8px 0; }\n.ai-answer h1, .ai-answer h2, .ai-answer h3,\n.ai-answer h4, .ai-answer h5, .ai-answer h6 {\n  margin: 12px 0 6px;\n  line-height: 1.35;\n  font-weight: 600;\n}\n.ai-answer h1 { font-size: 20px; }\n.ai-answer h2 { font-size: 18px; }\n.ai-answer h3 { font-size: 16px; }\n.ai-answer h4 { font-size: 15px; }\n.ai-answer h5, .ai-answer h6 { font-size: 14px; }\n\n/* 链接 */\n.ai-answer a {\n  text-decoration: underline;\n  cursor: pointer;\n}\n\n/* 引用块 */\n.ai-answer blockquote {\n  margin: 8px 0;\n  padding: 6px 10px;\n  border-left: 3px solid rgba(0,0,0,0.2);\n  background: rgba(0,0,0,0.03);\n}\n\n/* 水平线 */\n.ai-answer hr {\n  border: 0;\n  border-top: 1px solid rgba(0,0,0,0.15);\n  margin: 10px 0;\n}\n\n/* 代码块与行内代码 */\n.ai-answer pre.ykt-md-code {\n  margin: 8px 0;\n  padding: 10px;\n  overflow: auto;\n  border: 1px solid rgba(0,0,0,0.15);\n  border-radius: 6px;\n  background: #f7f8fa;\n}\n.ai-answer pre.ykt-md-code code {\n  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;\n  font-size: 12px;\n}\n.ai-answer code.ykt-md-inline {\n  padding: 1px 4px;\n  border: 1px solid rgba(0,0,0,0.15);\n  border-radius: 4px;\n  background: #f7f8fa;\n  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;\n  font-size: 12px;\n}\n\n/* 列表 */\n.ai-answer ul, .ai-answer ol {\n  margin: 6px 0 6px 22px;   \n}\n.ai-answer ul { list-style: disc; }\n.ai-answer ol { list-style: decimal; }\n\n/* 表格 */\n.ai-answer table {\n  border-collapse: collapse;\n  margin: 8px 0;\n  width: 100%;\n  max-width: 100%;\n}\n.ai-answer th, .ai-answer td {\n  border: 1px solid rgba(0,0,0,0.15);\n  padding: 6px 8px;\n  text-align: left;\n}\n.ai-answer thead th {\n  background: rgba(0,0,0,0.05);\n  font-weight: 600;\n}\n\n/* 适配深色 */\n@media (prefers-color-scheme: dark) {\n  .ai-answer blockquote {\n    border-left-color: rgba(255,255,255,0.35);\n    background: rgba(255,255,255,0.06);\n  }\n  .ai-answer pre.ykt-md-code,\n  .ai-answer code.ykt-md-inline {\n    background: #111418;\n    border-color: rgba(255,255,255,0.2);\n  }\n  .ai-answer hr { border-top-color: rgba(255,255,255,0.2); }\n  .ai-answer th, .ai-answer td { border-color: rgba(255,255,255,0.2); }\n  .ai-answer thead th { background: rgba(255,255,255,0.08); }\n}\n\n#ykt-ai-answer.tex-enabled svg { vertical-align: middle; }\n#ykt-ai-answer.tex-enabled .MathJax { line-height: 1; }\n#ykt-ai-answer .mjx-svg { color: currentColor; }\n';
+  var css = '/* ===== 通用 & 修复 ===== */\r\n#watermark_layer { display: none !important; visibility: hidden !important; }\r\n.hidden { display: none !important; }\r\n\r\n:root{\r\n  --ykt-z: 10000000;\r\n  --ykt-border: #ddd;\r\n  --ykt-border-strong: #ccc;\r\n  --ykt-bg: #fff;\r\n  --ykt-fg: #222;\r\n  --ykt-muted: #607190;\r\n  --ykt-accent: #1d63df;\r\n  --ykt-hover: #1e3050;\r\n  --ykt-shadow: 0 10px 30px rgba(0,0,0,.18);\r\n}\r\n\r\n/* ===== 工具栏 ===== */\r\n#ykt-helper-toolbar{\r\n  position: fixed; z-index: calc(var(--ykt-z) + 1);\r\n  left: 15px; bottom: 15px;\r\n  /* 移除固定宽度，让内容自适应 */\r\n  height: 36px; padding: 5px;\r\n  display: flex; gap: 6px; align-items: center;\r\n  background: var(--ykt-bg);\r\n  border: 1px solid var(--ykt-border-strong);\r\n  border-radius: 4px;\r\n  box-shadow: 0 1px 4px 3px rgba(0,0,0,.1);\r\n}\r\n\r\n#ykt-helper-toolbar .btn{\r\n  display: inline-block; padding: 4px; cursor: pointer;\r\n  color: var(--ykt-muted); line-height: 1;\r\n}\r\n#ykt-helper-toolbar .btn:hover{ color: var(--ykt-hover); }\r\n#ykt-helper-toolbar .btn.active{ color: var(--ykt-accent); }\r\n\r\n/* ===== 面板通用样式 ===== */\r\n.ykt-panel{\r\n  position: fixed; right: 20px; bottom: 60px;\r\n  width: 560px; max-height: 72vh; overflow: auto;\r\n  background: var(--ykt-bg); color: var(--ykt-fg);\r\n  border: 1px solid var(--ykt-border-strong); border-radius: 8px;\r\n  box-shadow: var(--ykt-shadow);\r\n  display: none; \r\n  /* 提高z-index，确保后打开的面板在最上层 */\r\n  z-index: var(--ykt-z);\r\n}\r\n.ykt-panel.visible{ \r\n  display: block; \r\n  /* 动态提升z-index */\r\n  z-index: calc(var(--ykt-z) + 10);\r\n}\r\n\r\n.panel-header{\r\n  display: flex; align-items: center; justify-content: space-between;\r\n  gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--ykt-border);\r\n}\r\n.panel-header h3{ margin: 0; font-size: 16px; font-weight: 600; }\r\n.panel-body{ padding: 10px 12px; }\r\n.close-btn{ cursor: pointer; color: var(--ykt-muted); }\r\n.close-btn:hover{ color: var(--ykt-hover); }\r\n\r\n/* ===== 设置面板 (#ykt-settings-panel) ===== */\r\n#ykt-settings-panel .settings-content{ display: flex; flex-direction: column; gap: 14px; }\r\n#ykt-settings-panel .setting-group{ border: 1px dashed var(--ykt-border); border-radius: 6px; padding: 10px; }\r\n#ykt-settings-panel .setting-group h4{ margin: 0 0 8px 0; font-size: 14px; }\r\n#ykt-settings-panel .setting-item{ display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }\r\n#ykt-settings-panel label{ font-size: 13px; }\r\n#ykt-settings-panel input[type="text"],\r\n#ykt-settings-panel input[type="number"]{\r\n  height: 30px; border: 1px solid var(--ykt-border-strong);\r\n  border-radius: 4px; padding: 0 8px; min-width: 220px;\r\n}\r\n#ykt-settings-panel small{ color: #666; }\r\n#ykt-settings-panel .setting-actions{ display: flex; gap: 8px; margin-top: 6px; }\r\n#ykt-settings-panel button{\r\n  height: 30px; padding: 0 12px; border-radius: 6px;\r\n  border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\r\n}\r\n#ykt-settings-panel button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\r\n\r\n/* 自定义复选框（与手写脚本一致的视觉语义） */\r\n#ykt-settings-panel .checkbox-label{ position: relative; padding-left: 26px; cursor: pointer; user-select: none; }\r\n#ykt-settings-panel .checkbox-label input{ position: absolute; opacity: 0; cursor: pointer; height: 0; width: 0; }\r\n#ykt-settings-panel .checkbox-label .checkmark{\r\n  position: absolute; left: 0; top: 50%; transform: translateY(-50%);\r\n  height: 16px; width: 16px; border:1px solid var(--ykt-border-strong); border-radius: 3px; background: #fff;\r\n}\r\n#ykt-settings-panel .checkbox-label input:checked ~ .checkmark{\r\n  background: var(--ykt-accent); border-color: var(--ykt-accent);\r\n}\r\n#ykt-settings-panel .checkbox-label .checkmark:after{\r\n  content: ""; position: absolute; display: none;\r\n  left: 5px; top: 1px; width: 4px; height: 8px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);\r\n}\r\n#ykt-settings-panel .checkbox-label input:checked ~ .checkmark:after{ display: block; }\r\n\r\n/* ===== AI 解答面板 (#ykt-ai-answer-panel) ===== */\r\n#ykt-ai-answer-panel .ai-question{\r\n  white-space: pre-wrap; background: #fafafa; border: 1px solid var(--ykt-border);\r\n  padding: 8px; border-radius: 6px; margin-bottom: 8px; max-height: 160px; overflow: auto;\r\n}\r\n#ykt-ai-answer-panel .ai-loading{ color: var(--ykt-accent); margin-bottom: 6px; }\r\n#ykt-ai-answer-panel .ai-error{ color: #b00020; margin-bottom: 6px; }\r\n#ykt-ai-answer-panel .ai-answer{ white-space: pre-wrap; margin-top: 4px; }\r\n#ykt-ai-answer-panel .ai-actions{ margin-top: 10px; }\r\n#ykt-ai-answer-panel .ai-actions button{\r\n  height: 30px; padding: 0 12px; border-radius: 6px;\r\n  border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\r\n}\r\n#ykt-ai-answer-panel .ai-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\r\n\r\n/* ===== 课件浏览面板 (#ykt-presentation-panel) ===== */\r\n#ykt-presentation-panel{ width: 900px; }\r\n#ykt-presentation-panel .panel-controls{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }\r\n#ykt-presentation-panel .panel-body{\r\n  display: grid; grid-template-columns: 300px 1fr; gap: 10px;\r\n}\r\n#ykt-presentation-panel .panel-left,\r\n#ykt-presentation-panel .panel-right{\r\n  display: flex;\r\n  flex-direction: column;\r\n}\r\n#ykt-presentation-panel .presentation-list{\r\n  border: 1px solid var(--ykt-border);\r\n  border-radius: 8px;\r\n  background: #fff;\r\n  padding: 10px;\r\n  box-sizing: border-box;\r\n}\r\n#ykt-presentation-panel .presentation-title{\r\n  font-weight: 600; padding: 6px 0; border-bottom: 1px solid var(--ykt-border);\r\n}\r\n#ykt-presentation-panel .slide-thumb-list{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }\r\n#ykt-presentation-panel .slide-thumb{\r\n  position: relative; border: 1px solid var(--ykt-border); border-radius: 6px; background: #fafafa;\r\n  min-height: 60px; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 4px; text-align: center;\r\n}\r\n#ykt-presentation-panel .slide-thumb:hover{ border-color: var(--ykt-accent); background: #eef3ff; }\r\n#ykt-presentation-panel .slide-thumb img{ max-width: 100%; max-height: 120px; object-fit: contain; display: block; }\r\n#ykt-presentation-panel .slide-thumb-placeholder{\r\n  max-width: 100%; padding: 12px 4px; color: var(--ykt-muted, #6b7280); font-size: 12px; line-height: 1.4; white-space: pre-line;\r\n}\r\n.ykt-presentation-panel .slide-index {\r\n  position: absolute; top: 4px; left: 4px; z-index: 2;               \r\n  padding: 2px 6px; border-radius: 4px; font-size: 12px; line-height: 1;\r\n  background: rgba(0, 0, 0, 0.6); color: #fff; pointer-events: none;\r\n}\r\n#ykt-presentation-panel .slide-view{\r\n  position: relative; border: 1px solid var(--ykt-border); border-radius: 8px; min-height: 360px; background: #fff; overflow: hidden;\r\n}\r\n#ykt-presentation-panel .slide-cover{ display: flex; align-items: center; justify-content: center; min-height: 360px; }\r\n#ykt-presentation-panel .slide-cover img{ max-width: 100%; max-height: 100%; object-fit: contain; display: block; }\r\n#ykt-presentation-panel .ocr-panel{\r\n  margin-top: 12px;\r\n  border: 1px solid var(--ykt-border);\r\n  border-radius: 8px;\r\n  background: #fff;\r\n  padding: 12px;\r\n}\r\n#ykt-presentation-panel .ocr-head{\r\n  display: flex;\r\n  align-items: center;\r\n  justify-content: space-between;\r\n  gap: 8px;\r\n  margin-bottom: 8px;\r\n  font-weight: 600;\r\n}\r\n#ykt-presentation-panel .ocr-status{\r\n  font-size: 12px;\r\n  color: var(--ykt-muted);\r\n}\r\n#ykt-presentation-panel .ocr-status.is-loading{ color: #a16207; }\r\n#ykt-presentation-panel .ocr-status.is-error{ color: #b42318; }\r\n#ykt-presentation-panel .ocr-status.is-success{ color: #027a48; }\r\n#ykt-presentation-panel .ocr-tip{\r\n  margin-bottom: 8px;\r\n  font-size: 12px;\r\n  color: var(--ykt-muted);\r\n}\r\n#ykt-presentation-panel .ocr-translate-bar{\r\n  display: flex;\r\n  align-items: center;\r\n  gap: 8px;\r\n  flex-wrap: wrap;\r\n  margin: 12px 0 8px;\r\n}\r\n#ykt-presentation-panel .ocr-translate-bar .ocr-status{\r\n  margin-left: auto;\r\n}\r\n#ykt-presentation-panel .ocr-target-input{\r\n  min-width: 220px;\r\n  height: 32px;\r\n  border: 1px solid var(--ykt-border-strong);\r\n  border-radius: 6px;\r\n  padding: 0 10px;\r\n  box-sizing: border-box;\r\n}\r\n#ykt-presentation-panel .ocr-subhead{\r\n  margin-top: 4px;\r\n}\r\n#ykt-presentation-panel .ocr-result{\r\n  width: 100%;\r\n  min-height: 180px;\r\n  resize: vertical;\r\n  border: 1px solid var(--ykt-border-strong);\r\n  border-radius: 6px;\r\n  padding: 10px;\r\n  line-height: 1.5;\r\n  font-size: 13px;\r\n  box-sizing: border-box;\r\n  background: #fafafa;\r\n}\r\n\r\n#ykt-presentation-panel .problem-box{\r\n  position: absolute; left: 12px; right: 12px; bottom: 12px;\r\n  background: rgba(255,255,255,.96); border: 1px solid var(--ykt-border);\r\n  border-radius: 8px; padding: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.12);\r\n}\r\n#ykt-presentation-panel .problem-head{ font-weight: 600; margin-bottom: 6px; padding-right: 28px; }\r\n#ykt-presentation-panel .problem-box-close{\r\n  position: absolute; top: 6px; right: 6px;\r\n  width: 22px; height: 22px; border-radius: 999px;\r\n  border: 1px solid var(--ykt-border-strong);\r\n  background: #fff; color: #555;\r\n  cursor: pointer; font-size: 16px; line-height: 18px;\r\n  padding: 0;\r\n}\r\n#ykt-presentation-panel .problem-box-close:hover{ color: #111; border-color: var(--ykt-accent); }\r\n#ykt-presentation-panel .problem-options{ display: grid; grid-template-columns: 1fr; gap: 4px; }\r\n#ykt-presentation-panel .problem-option{ padding: 6px 8px; border: 1px solid var(--ykt-border); border-radius: 6px; background: #fafafa; }\r\n\r\n/* ===== 题目列表面板 (#ykt-problem-list-panel) ===== */\r\n#ykt-problem-list{ display: flex; flex-direction: column; gap: 10px; }\r\n#ykt-problem-list .problem-row{\r\n  border: 1px solid var(--ykt-border); border-radius: 8px; padding: 8px; background: #fafafa;\r\n}\r\n#ykt-problem-list .problem-title{ font-weight: 600; margin-bottom: 4px; }\r\n#ykt-problem-list .problem-meta{ color: #666; font-size: 12px; margin-bottom: 6px; }\r\n#ykt-problem-list .problem-actions{ display: flex; gap: 8px; align-items: center; }\r\n#ykt-problem-list .problem-actions button{\r\n  height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\r\n}\r\n#ykt-problem-list .problem-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\r\n#ykt-problem-list .problem-done{ color: #0a7a2f; font-weight: 600; }\r\n\r\n/* ===== 活动题目列表（右下角小卡片） ===== */\r\n#ykt-active-problems-panel.ykt-active-wrapper{\r\n  position: fixed; right: 20px; bottom: 60px; z-index: var(--ykt-z);\r\n}\r\n#ykt-active-problems{ display: flex; flex-direction: column; gap: 8px; max-height: 60vh; overflow: auto; }\r\n#ykt-active-problems .active-problem-card{\r\n  position: relative;\r\n  width: 320px; background: #fff; border: 1px solid var(--ykt-border);\r\n  border-radius: 8px; box-shadow: var(--ykt-shadow); padding: 10px;\r\n}\r\n#ykt-active-problems .ap-close{\r\n  position: absolute; top: 6px; right: 6px;\r\n  width: 20px; height: 20px; border-radius: 999px;\r\n  border: 1px solid var(--ykt-border-strong);\r\n  background: #fff; color: #555;\r\n  cursor: pointer; padding: 0; font-size: 14px; line-height: 16px;\r\n}\r\n#ykt-active-problems .ap-close:hover{ color: #111; border-color: var(--ykt-accent); }\r\n#ykt-active-problems .ap-title{ font-weight: 600; margin-bottom: 4px; }\r\n#ykt-active-problems .ap-info{ color: #666; font-size: 12px; margin-bottom: 8px; }\r\n#ykt-active-problems .ap-actions{ display: flex; gap: 8px; }\r\n#ykt-active-problems .ap-actions button{\r\n  height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ykt-border-strong); background: #f7f8fa; cursor: pointer;\r\n}\r\n#ykt-active-problems .ap-actions button:hover{ background: #eef3ff; border-color: var(--ykt-accent); }\r\n\r\n/* ===== 教程面板 (#ykt-tutorial-panel) ===== */\r\n#ykt-tutorial-panel .tutorial-content h4{ margin: 8px 0 6px; }\r\n#ykt-tutorial-panel .tutorial-content p,\r\n#ykt-tutorial-panel .tutorial-content li{ line-height: 1.5; }\r\n#ykt-tutorial-panel .tutorial-content a{ color: var(--ykt-accent); text-decoration: none; }\r\n#ykt-tutorial-panel .tutorial-content a:hover{ text-decoration: underline; }\r\n\r\n/* ===== 小屏适配 ===== */\r\n@media (max-width: 1200px){\r\n  #ykt-presentation-panel{ width: 760px; }\r\n  #ykt-presentation-panel .panel-body{ grid-template-columns: 260px 1fr; }\r\n}\r\n@media (max-width: 900px){\r\n  .ykt-panel{ right: 12px; left: 12px; width: auto; }\r\n  #ykt-presentation-panel{ width: auto; }\r\n  #ykt-presentation-panel .panel-body{ grid-template-columns: 1fr; }\r\n}\r\n\r\n/* ===== 自动作答成功弹窗 ===== */\r\n.auto-answer-popup{\r\n  position: fixed; inset: 0; z-index: calc(var(--ykt-z) + 2);\r\n  background: rgba(0,0,0,.2);\r\n  display: flex; align-items: flex-end; justify-content: flex-end;\r\n  opacity: 0; transition: opacity .18s ease;\r\n}\r\n.auto-answer-popup.visible{ opacity: 1; }\r\n\r\n.auto-answer-popup .popup-content{\r\n  width: min(560px, 96vw);\r\n  background: #fff; border: 1px solid var(--ykt-border-strong);\r\n  border-radius: 10px; box-shadow: var(--ykt-shadow);\r\n  margin: 16px; overflow: hidden;\r\n}\r\n\r\n.auto-answer-popup .popup-header{\r\n  display: flex; align-items: center; justify-content: space-between;\r\n  gap: 12px; padding: 10px 12px; border-bottom: 1px solid var(--ykt-border);\r\n}\r\n.auto-answer-popup .popup-header h4{ margin: 0; font-size: 16px; }\r\n.auto-answer-popup .close-btn{ cursor: pointer; color: var(--ykt-muted); }\r\n.auto-answer-popup .close-btn:hover{ color: var(--ykt-hover); }\r\n\r\n.auto-answer-popup .popup-body{ padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }\r\n.auto-answer-popup .popup-row{ display: grid; grid-template-columns: 56px 1fr; gap: 8px; align-items: start; }\r\n.auto-answer-popup .label{ color: #666; font-size: 12px; line-height: 1.8; }\r\n.auto-answer-popup .content{ white-space: normal; word-break: break-word; }\r\n\r\n/* ===== 1.16.6: 课件浏览面板：固定右侧详细视图，左侧独立滚动 ===== */\r\n#ykt-presentation-panel {\r\n  --ykt-panel-max-h: 72vh;           /* 与 .ykt-panel 的最大高度保持一致 */\r\n}\r\n\r\n/* 两列布局：左列表 + 右详细视图 */\r\n#ykt-presentation-panel .panel-body{\r\n  display: grid;\r\n  grid-template-columns: 300px 1fr;  \r\n  gap: 12px;\r\n  overflow: hidden;                  \r\n  align-items: start;\r\n}\r\n\r\n/* 左侧：只让左列滚动，限制在面板可视高度内 */\r\n#ykt-presentation-panel .panel-left{\r\n  max-height: var(--ykt-panel-max-h);\r\n  overflow: auto;\r\n  min-width: 0;\r\n  align-self: stretch;\r\n}\r\n\r\n/* 右侧：粘性定位为“固定”，始终在面板可视区内 */\r\n#ykt-presentation-panel .panel-right{\r\n  position: sticky;\r\n  top: 0;                            \r\n  align-self: start;\r\n  gap: 12px;\r\n}\r\n\r\n/* 右侧详细视图自身也限制高度并允许内部滚动 */\r\n#ykt-presentation-panel .slide-view{\r\n  max-height: var(--ykt-panel-max-h);\r\n  overflow: auto;\r\n  border: 1px solid var(--ykt-border);\r\n  border-radius: 8px;\r\n  background: #fff;\r\n}\r\n\r\n/* 小屏自适配：堆叠布局时取消 sticky，避免遮挡 */\r\n@media (max-width: 900px){\r\n  #ykt-presentation-panel .panel-body{\r\n    grid-template-columns: 1fr;\r\n  }\r\n  #ykt-presentation-panel .panel-right{\r\n    position: static;\r\n  }\r\n}\r\n\r\n/* 在现有样式基础上添加 */\r\n\r\n.text-status {\r\n  font-size: 12px;\r\n  padding: 4px 8px;\r\n  border-radius: 4px;\r\n  margin: 4px 0;\r\n  display: inline-block;\r\n}\r\n\r\n.text-status.success {\r\n  background-color: #d4edda;\r\n  color: #155724;\r\n  border: 1px solid #c3e6cb;\r\n}\r\n\r\n.text-status.warning {\r\n  background-color: #fff3cd;\r\n  color: #856404;\r\n  border: 1px solid #ffeaa7;\r\n}\r\n\r\n.ykt-question-display {\r\n  background: #f8f9fa;\r\n  border: 1px solid #dee2e6;\r\n  border-radius: 4px;\r\n  padding: 8px;\r\n  margin: 4px 0;\r\n  max-height: 150px;\r\n  overflow-y: auto;\r\n  font-family: monospace;\r\n  font-size: 13px;\r\n  line-height: 1.4;\r\n}\r\n\r\n/* 在现有样式基础上添加 */\r\n\r\n.ykt-custom-prompt {\r\n  width: 100%;\r\n  min-height: 60px;\r\n  padding: 8px;\r\n  border: 1px solid #ddd;\r\n  border-radius: 4px;\r\n  font-family: inherit;\r\n  font-size: 13px;\r\n  line-height: 1.4;\r\n  resize: vertical;\r\n  background-color: #fff;\r\n  transition: border-color 0.3s ease;\r\n}\r\n\r\n.ykt-custom-prompt:focus {\r\n  outline: none;\r\n  border-color: #007bff;\r\n  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);\r\n}\r\n\r\n.ykt-custom-prompt::placeholder {\r\n  color: #999;\r\n  font-style: italic;\r\n}\r\n\r\n.ykt-custom-prompt:empty::before {\r\n  content: attr(placeholder);\r\n  color: #999;\r\n  font-style: italic;\r\n  pointer-events: none;\r\n}\r\n\r\n/* 确保输入框在暗色主题下也能正常显示 */\r\n.ykt-panel.dark .ykt-custom-prompt {\r\n  background-color: #2d3748;\r\n  border-color: #4a5568;\r\n  color: #e2e8f0;\r\n}\r\n\r\n.ykt-panel.dark .ykt-custom-prompt::placeholder {\r\n  color: #a0aec0;\r\n}\r\n\r\n.ykt-panel.dark .ykt-custom-prompt:focus {\r\n  border-color: #63b3ed;\r\n  box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.25);\r\n}\r\n\r\n/* ===== Markdown-like 样式 ===== */\r\n.ai-answer {\r\n  white-space: normal;\r\n  line-height: 1.6;\r\n  font-size: 14px;\r\n  color: inherit;\r\n}\r\n\r\n/* 段落和标题间距 */\r\n.ai-answer p { margin: 8px 0; }\r\n.ai-answer h1, .ai-answer h2, .ai-answer h3,\r\n.ai-answer h4, .ai-answer h5, .ai-answer h6 {\r\n  margin: 12px 0 6px;\r\n  line-height: 1.35;\r\n  font-weight: 600;\r\n}\r\n.ai-answer h1 { font-size: 20px; }\r\n.ai-answer h2 { font-size: 18px; }\r\n.ai-answer h3 { font-size: 16px; }\r\n.ai-answer h4 { font-size: 15px; }\r\n.ai-answer h5, .ai-answer h6 { font-size: 14px; }\r\n\r\n/* 链接 */\r\n.ai-answer a {\r\n  text-decoration: underline;\r\n  cursor: pointer;\r\n}\r\n\r\n/* 引用块 */\r\n.ai-answer blockquote {\r\n  margin: 8px 0;\r\n  padding: 6px 10px;\r\n  border-left: 3px solid rgba(0,0,0,0.2);\r\n  background: rgba(0,0,0,0.03);\r\n}\r\n\r\n/* 水平线 */\r\n.ai-answer hr {\r\n  border: 0;\r\n  border-top: 1px solid rgba(0,0,0,0.15);\r\n  margin: 10px 0;\r\n}\r\n\r\n/* 代码块与行内代码 */\r\n.ai-answer pre.ykt-md-code {\r\n  margin: 8px 0;\r\n  padding: 10px;\r\n  overflow: auto;\r\n  border: 1px solid rgba(0,0,0,0.15);\r\n  border-radius: 6px;\r\n  background: #f7f8fa;\r\n}\r\n.ai-answer pre.ykt-md-code code {\r\n  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;\r\n  font-size: 12px;\r\n}\r\n.ai-answer code.ykt-md-inline {\r\n  padding: 1px 4px;\r\n  border: 1px solid rgba(0,0,0,0.15);\r\n  border-radius: 4px;\r\n  background: #f7f8fa;\r\n  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;\r\n  font-size: 12px;\r\n}\r\n\r\n/* 列表 */\r\n.ai-answer ul, .ai-answer ol {\r\n  margin: 6px 0 6px 22px;   \r\n}\r\n.ai-answer ul { list-style: disc; }\r\n.ai-answer ol { list-style: decimal; }\r\n\r\n/* 表格 */\r\n.ai-answer table {\r\n  border-collapse: collapse;\r\n  margin: 8px 0;\r\n  width: 100%;\r\n  max-width: 100%;\r\n}\r\n.ai-answer th, .ai-answer td {\r\n  border: 1px solid rgba(0,0,0,0.15);\r\n  padding: 6px 8px;\r\n  text-align: left;\r\n}\r\n.ai-answer thead th {\r\n  background: rgba(0,0,0,0.05);\r\n  font-weight: 600;\r\n}\r\n\r\n/* 适配深色 */\r\n@media (prefers-color-scheme: dark) {\r\n  .ai-answer blockquote {\r\n    border-left-color: rgba(255,255,255,0.35);\r\n    background: rgba(255,255,255,0.06);\r\n  }\r\n  .ai-answer pre.ykt-md-code,\r\n  .ai-answer code.ykt-md-inline {\r\n    background: #111418;\r\n    border-color: rgba(255,255,255,0.2);\r\n  }\r\n  .ai-answer hr { border-top-color: rgba(255,255,255,0.2); }\r\n  .ai-answer th, .ai-answer td { border-color: rgba(255,255,255,0.2); }\r\n  .ai-answer thead th { background: rgba(255,255,255,0.08); }\r\n}\r\n\r\n#ykt-ai-answer.tex-enabled svg { vertical-align: middle; }\r\n#ykt-ai-answer.tex-enabled .MathJax { line-height: 1; }\r\n#ykt-ai-answer .mjx-svg { color: currentColor; }\r\n';
   // src/ui/styles.js
     function injectStyles() {
     gm.addStyle(css);

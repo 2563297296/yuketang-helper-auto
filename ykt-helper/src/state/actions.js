@@ -1,9 +1,9 @@
 // src/state/actions.js
 import { PROBLEM_TYPE_MAP } from '../core/types.js';
-import { randInt, gm } from '../core/env.js'
+import { gm } from '../core/env.js';
 import { repo } from './repo.js';
 import { ui } from '../ui/ui-api.js';
-import { submitAnswer, retryAnswer } from '../tsm/answer.js';;
+import { submitAnswer } from '../tsm/answer.js';
 import { queryAI, queryAIVision} from '../ai/openai.js';
 import { showAutoAnswerPopup } from '../ui/panels/auto-answer-popup.js';
 import { formatProblemForVision, parseAIAnswer } from '../tsm/ai-format.js';
@@ -71,13 +71,121 @@ function notifyAutoAnswer(kind, problem, detail) {
   const [title, defaultDetail] = AUTO_ANSWER_EVENT_META[kind] || ['自动作答提示', '自动作答状态发生变化。'];
   return ui.notifyClassroomEvent({
     kind,
-    dedupeKey: `${kind}:${problem?.problemId || Date.now()}`,
+    dedupeKey: `${kind}:${problem?.problemId ?? problem?.id ?? Date.now()}`,
     title,
     detail: detail || defaultDetail,
     problem,
   });
 }
 
+const pendingAutoAnswers = new Map();
+
+function autoAnswerKey(value) {
+  const key = String(value ?? '').trim();
+  return key || null;
+}
+
+function findPublishedProblemSlide(event) {
+  const direct = repo.getSlide(event?.slideId);
+  const problemId = autoAnswerKey(event?.problemId);
+  if (direct) {
+    const directProblemId = autoAnswerKey(direct?.problem?.problemId ?? direct?.problem?.id);
+    if (!directProblemId || directProblemId === problemId) return direct;
+  }
+
+  if (!problemId) return null;
+
+  for (const slide of repo.slides.values()) {
+    const slideProblemId = slide?.problem?.problemId ?? slide?.problem?.id;
+    if (autoAnswerKey(slideProblemId) === problemId) return slide;
+  }
+
+  for (const [presentationId, presentation] of repo.presentations) {
+    for (const slide of Array.isArray(presentation?.slides) ? presentation.slides : []) {
+      const slideProblemId = slide?.problem?.problemId ?? slide?.problem?.id;
+      if (autoAnswerKey(slideProblemId) !== problemId) continue;
+      const found = slide.presentationId == null
+        ? { ...slide, presentationId }
+        : slide;
+      repo.upsertSlide(found);
+      repo.upsertProblem(slide.problem);
+      return found;
+    }
+  }
+  return null;
+}
+
+function scheduleAutoAnswer(problem, status) {
+  if (
+    !ui.config.autoAnswer ||
+    !problem ||
+    problem.result ||
+    status.done ||
+    status.answering ||
+    Number.isFinite(status.autoAnswerTime) ||
+    isDeadlineReached(status.endTime)
+  ) {
+    return null;
+  }
+
+  const base = Math.max(0, Number(ui.config.autoAnswerDelay) || 0);
+  const random = Math.max(0, Number(ui.config.autoAnswerRandomDelay) || 0);
+  const delay = base + (random ? Math.floor(Math.random() * (random + 1)) : 0);
+  status.autoAnswerTime = Date.now() + delay;
+  notifyAutoAnswer('auto-answer-scheduled', problem, `将在约 ${Math.floor(delay / 1000)} 秒后开始自动作答。`);
+  return delay;
+}
+
+export function processPendingAutoAnswers() {
+  for (const [problemId, event] of pendingAutoAnswers) {
+    const slide = findPublishedProblemSlide(event);
+    const candidate = repo.getProblem(problemId) || slide?.problem;
+    if (!candidate || !slide) continue;
+
+    repo.upsertSlide(slide);
+    repo.upsertProblem(candidate);
+    const problem = repo.getProblem(problemId) || { ...candidate, problemId };
+
+    const status = repo.getProblemStatus(problemId) || {};
+    status.presentationId ??= event.presentationId ?? slide.presentationId;
+    status.slideId ??= event.slideId ?? slide.id ?? slide.slideId;
+    status.startTime ??= event.startTime;
+    const deadline = deadlineFromLimit(event.startTime, event.limit);
+    if (Number.isFinite(deadline)) status.endTime ??= deadline;
+    status.done ??= !!problem.result;
+    status.autoAnswerTime ??= null;
+    status.answering ??= false;
+    repo.setProblemStatus(problemId, status);
+
+    const scheduled = scheduleAutoAnswer(problem, status);
+    pendingAutoAnswers.delete(problemId);
+    if (scheduled !== null) {
+      console.log('[雨课堂助手][INFO][Publish] 新题已加入自动作答队列:', problemId);
+    }
+  }
+}
+
+export function tickAutoAnswers() {
+  processPendingAutoAnswers();
+
+  const now = Date.now();
+  for (const [problemId, status] of repo.problemStatus) {
+    if (!status || typeof status !== 'object') continue;
+
+    const problem = repo.getProblem(problemId);
+    if (status.done || problem?.result || isDeadlineReached(status.endTime)) {
+      status.autoAnswerTime = null;
+      continue;
+    }
+    if (!Number.isFinite(status.autoAnswerTime) || now < status.autoAnswerTime) continue;
+
+    const slide = repo.getSlide(status.slideId);
+    if (!problem || !slide) continue;
+
+    status.autoAnswerTime = null;
+    void handleAutoAnswerInternal(problem);
+  }
+}
 // 无AI默认答案生成
 function makeDefaultAnswer(problem) {
   switch (problem.problemType) {
@@ -110,7 +218,11 @@ export function hasActiveAIProfile(aiCfg) {
 
 // 融合模式自动答题
 async function handleAutoAnswerInternal(problem) {
-  const status = repo.problemStatus.get(problem.problemId);
+  const problemId = autoAnswerKey(problem?.problemId ?? problem?.id);
+  if (!problemId) return;
+  problem = problem?.problemId === problemId ? problem : { ...problem, problemId };
+
+  const status = repo.getProblemStatus(problemId);
   if (!status || status.answering || problem.result) {
     console.log('[AutoAnswer] 跳过：', {
       hasStatus: !!status,
@@ -147,10 +259,11 @@ async function handleAutoAnswerInternal(problem) {
         endTime: status.endTime,
         forceRetry: false,
         lessonId: repo.currentLessonId,
+        autoGate: false,
       });
 
       // 更新状态与UI
-      actions.onAnswerProblem(problem.problemId, parsed);
+      actions.onAnswerProblem(problemId, parsed);
       status.done = true;
       status.answering = false;
       notifyAutoAnswer('auto-answer-succeeded', problem, '这道题已使用本地默认答案提交。');
@@ -214,13 +327,14 @@ async function handleAutoAnswerInternal(problem) {
       startTime: status.startTime,
       endTime: status.endTime,
       forceRetry: false,
-      lessonId: repo.currentLessonId
+      lessonId: repo.currentLessonId,
+      autoGate: false,
     });
     
     console.log('[雨课堂助手][INFO][AutoAnswer] 提交成功');
     
     // 更新状态
-    actions.onAnswerProblem(problem.problemId, parsed);
+    actions.onAnswerProblem(problemId, parsed);
     status.done = true;
     status.answering = false;
     notifyAutoAnswer('auto-answer-succeeded', problem);
@@ -240,21 +354,8 @@ async function handleAutoAnswerInternal(problem) {
 export function startAutoAnswerLoop() {
   if (_autoLoopStarted) return;
   _autoLoopStarted = true;
-
-  setInterval(() => {
-    const now = Date.now();
-    repo.problemStatus.forEach((status, pid) => {
-      if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
-        const problem = repo.problems.get(pid);
-        if (problem && !problem.result) {
-          status.autoAnswerTime = null;
-          handleAutoAnswerInternal(problem);
-        }
-      }
-    });
-  }, 500);
+  setInterval(tickAutoAnswers, 500);
 }
-
 export const actions = {
   onFetchTimeline(timeline, options = {}) {
     for (const piece of Array.isArray(timeline) ? timeline : []) {
@@ -265,7 +366,8 @@ export const actions = {
   onPresentationLoaded(id, data) {
     repo.setPresentation(id, data);
     const pres = repo.presentations.get(id);
-    for (const slide of pres.slides) {
+    const slides = Array.isArray(pres?.slides) ? pres.slides : [];
+    for (const slide of slides) {
       repo.upsertSlide(slide);
       if (slide.problem) {
         repo.upsertProblem(slide.problem);
@@ -277,64 +379,65 @@ export const actions = {
 
   onUnlockProblem(data, { notificationOnly = false } = {}) {
     const payload = data && typeof data === 'object' ? data : {};
-    const problemId = firstValue(
+    const problemId = autoAnswerKey(firstValue(
       payload.prob,
       payload.problemId,
       payload.problemid,
       payload.problem?.problemId,
       payload.problem?.id,
       payload.id,
-    );
-    const slideId = firstValue(payload.sid, payload.slideId, payload.slide?.id);
-    const problem = repo.problems.get(problemId);
-    const slide = repo.slides.get(slideId);
-    if (!problem || !slide) {
-      if (notificationOnly) return notifyProblemStart(payload, problem, slide);
-      console.log('[雨课堂助手][ERR][onUnlockProblem] 题目或幻灯片不存在');
-      return false;
-    }
+    ));
+    const slideId = autoAnswerKey(firstValue(payload.sid, payload.slideId, payload.slide?.id));
+    const embeddedProblem = payload.problem && typeof payload.problem === 'object'
+      ? payload.problem
+      : null;
+    const embeddedSlide = payload.slide && typeof payload.slide === 'object'
+      ? payload.slide
+      : null;
 
-    console.log('[雨课堂助手][DBG][onUnlockProblem] 题目解锁');
-    console.log('[雨课堂助手][DBG][onUnlockProblem] 题目ID:', problemId);
-    console.log('[雨课堂助手][DBG][onUnlockProblem] 幻灯片ID:', slideId);
-    console.log('[雨课堂助手][DBG][onUnlockProblem] 课件ID:', payload.pres);
+    if (embeddedProblem) repo.upsertProblem(embeddedProblem);
+    if (embeddedSlide) repo.upsertSlide(embeddedSlide);
 
-    const status = {
-      presentationId: payload.pres,
-      slideId,
-      startTime: payload.dt,
-      endTime: deadlineFromLimit(payload.dt, payload.limit),
-      done: !!problem.result,
-      autoAnswerTime: null,
-      answering: false,
-    };
-    repo.problemStatus.set(problemId, status);
-
-    if (isDeadlineReached(status.endTime) || problem.result) {
-      console.log('[雨课堂助手][WARN][onUnlockProblem] 题目已过期或已作答，跳过');
-      return;
-    }
-
+    const problem = repo.getProblem(problemId) || embeddedProblem;
+    const slide = repo.getSlide(slideId) || embeddedSlide;
     const notified = notifyProblemStart(payload, problem, slide);
-    if (notificationOnly) return notified;
 
-    if (ui.config.autoAnswer) {
-      const delay = ui.config.autoAnswerDelay + randInt(0, ui.config.autoAnswerRandomDelay);
-      status.autoAnswerTime = Date.now() + delay;
-      
-      console.log(`[雨课堂助手][INFO][onUnlockProblem] 将在 ${Math.floor(delay / 1000)} 秒后自动作答`);
-      ui.toast(`将在 ${Math.floor(delay / 1000)} 秒后使用融合模式自动作答`, 3000);
-      notifyAutoAnswer('auto-answer-scheduled', problem, `将在约 ${Math.floor(delay / 1000)} 秒后开始自动作答。`);
+    if (!notificationOnly && ui.config.autoAnswer && problemId) {
+      pendingAutoAnswers.set(problemId, {
+        problemId,
+        slideId,
+        presentationId: autoAnswerKey(firstValue(
+          payload.pres,
+          payload.presentationId,
+          payload.presentation?.id,
+        )),
+        startTime: firstValue(payload.dt, payload.startTime, payload.start_time),
+        limit: firstValue(payload.limit, payload.duration),
+        autoAnswerCandidate: true,
+      });
+      processPendingAutoAnswers();
+      ui.updateActiveProblems?.();
     }
-    
-    ui.updateActiveProblems();
+
     return notified;
   },
 
-  onPublishEvent(event) {
+  onPublishEvent(event, { notificationOnly = false } = {}) {
     const notified = publishReminder.handle(event, ui.config);
     if (notified) {
       console.log('[雨课堂助手][INFO][Publish] 已提醒发布事件:', event.category, event.dedupeKey);
+    }
+
+    const problemId = autoAnswerKey(event?.problemId);
+    if (
+      !notificationOnly &&
+      ui.config.autoAnswer &&
+      event?.autoAnswerCandidate &&
+      problemId
+    ) {
+      pendingAutoAnswers.set(problemId, event);
+      processPendingAutoAnswers();
+      ui.updateActiveProblems?.();
     }
     return notified;
   },
@@ -349,13 +452,15 @@ export const actions = {
   },
 
   onAnswerProblem(problemId, result) {
-    const p = repo.problems.get(problemId);
-    if (p) {
-      p.result = result;
-      const i = repo.encounteredProblems.findIndex(e => e.problemId === problemId);
-      if (i !== -1) repo.encounteredProblems[i].result = result;
-      ui.updateProblemList();
-    }
+    const key = autoAnswerKey(problemId);
+    const p = repo.getProblem(key);
+    if (!p) return;
+    p.result = result;
+    const i = repo.encounteredProblems.findIndex(
+      entry => autoAnswerKey(entry.problemId) === key,
+    );
+    if (i !== -1) repo.encounteredProblems[i].result = result;
+    ui.updateProblemList();
   },
 
   async handleAutoAnswer(problem) {
@@ -363,25 +468,17 @@ export const actions = {
   },
 
   tickAutoAnswer() {
-    const now = Date.now();
-    for (const [pid, status] of repo.problemStatus) {
-      if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
-        const p = repo.problems.get(pid);
-        if (p) {
-          status.autoAnswerTime = null;
-          this.handleAutoAnswer(p);
-        }
-      }
-    }
+    return tickAutoAnswers();
   },
 
   async submit(problem, content) {
     const result = this.parseManual(problem.problemType, content);
-    await submitAnswer(problem, result,{
+    const pid = problem.problemId ?? problem.id;
+    await submitAnswer(problem, result, {
       lessonId: repo.currentLessonId,
-      autoGate: false  // 手动提交
+      autoGate: false,
     });
-    this.onAnswerProblem(problem.problemId, result);
+    this.onAnswerProblem(pid, result);
   },
 
   parseManual(problemType, content) {
@@ -421,22 +518,8 @@ export const actions = {
     void screenWakeLock.setEnabled(ui.config.keepScreenAwake);
   },
   
-    startAutoAnswerLoop() {
-    if (_autoLoopStarted) return;
-    _autoLoopStarted = true;
-
-    setInterval(() => {
-      const now = Date.now();
-      repo.problemStatus.forEach((status, pid) => {
-        if (status.autoAnswerTime !== null && now >= status.autoAnswerTime) {
-          const problem = repo.problems.get(pid);
-          if (problem && !problem.result) {
-            status.autoAnswerTime = null;
-            handleAutoAnswerInternal(problem);
-          }
-        }
-      });
-    }, 500);
+  startAutoAnswerLoop() {
+    return startAutoAnswerLoop();
   },
 
   // 自动进入课堂
@@ -497,7 +580,7 @@ export const actions = {
   installRouterRearm() {
     if (_routerHooked) return;
     _routerHooked = true;
-    const uw = (gm && gm.uw) ? gm.uw : (window.unsafeWindow || window);
+    const uw = gm?.uw || window.unsafeWindow || window;
     const rearm = () => {
       // 重置一次“onlesson 点击守卫”的进行中标记，避免被卡住
       _autoOnLessonClickInProgress = false;
@@ -527,7 +610,7 @@ export const actions = {
     // 仅在非课堂页（首页/课表页等）生效
     if (/\/lesson\//.test(location.pathname)) return;
 
-    const uw = (gm && gm.uw) ? gm.uw : (window.unsafeWindow || window);
+    const uw = gm?.uw || window.unsafeWindow || window;
 
     async function tryApiJumpFirst() {
       if (_autoOnLessonClickInProgress) return false;

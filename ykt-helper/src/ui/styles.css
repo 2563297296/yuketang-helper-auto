@@ -138,6 +138,9 @@
 }
 #ykt-presentation-panel .slide-thumb:hover{ border-color: var(--ykt-accent); background: #eef3ff; }
 #ykt-presentation-panel .slide-thumb img{ max-width: 100%; max-height: 120px; object-fit: contain; display: block; }
+#ykt-presentation-panel .slide-thumb-placeholder{
+  max-width: 100%; padding: 12px 4px; color: var(--ykt-muted, #6b7280); font-size: 12px; line-height: 1.4; white-space: pre-line;
+}
 .ykt-presentation-panel .slide-index {
   position: absolute; top: 4px; left: 4px; z-index: 2;               
   padding: 2px 6px; border-radius: 4px; font-size: 12px; line-height: 1;

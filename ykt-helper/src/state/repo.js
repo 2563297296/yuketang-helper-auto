@@ -1,6 +1,11 @@
 // src/state/repo.js
 import { storage } from '../core/storage.js';
 
+function problemKey(value) {
+  const key = String(value ?? '').trim();
+  return key || null;
+}
+
 export const repo = {
   presentations: new Map(), // id -> presentation
   slides: new Map(),        // slideId -> slide
@@ -26,15 +31,38 @@ export const repo = {
     });
   },
 
-  upsertSlide(slide) { this.slides.set(slide.id, slide); },
-  upsertProblem(prob) { this.problems.set(prob.problemId, prob); },
+  upsertSlide(slide) {
+    const key = problemKey(slide?.id ?? slide?.slideId);
+    if (!key) return false;
+    this.slides.set(key, slide);
+    return true;
+  },
+  upsertProblem(prob) {
+    const key = problemKey(prob?.problemId ?? prob?.id);
+    if (!key) return false;
+    const normalized = prob.problemId == null ? { ...prob, problemId: key } : prob;
+    this.problems.set(key, normalized);
+    return true;
+  },
+  getSlide(id) { return this.slides.get(problemKey(id)); },
+  hasSlide(id) { return this.slides.has(problemKey(id)); },
+  getProblem(id) { return this.problems.get(problemKey(id)); },
+  hasProblem(id) { return this.problems.has(problemKey(id)); },
+  getProblemStatus(id) { return this.problemStatus.get(problemKey(id)); },
+  setProblemStatus(id, status) {
+    const key = problemKey(id);
+    if (!key) return false;
+    this.problemStatus.set(key, status);
+    return true;
+  },
 
   pushEncounteredProblem(prob, slide, presentationId) {
-    if (!this.encounteredProblems.some(p => p.problemId === prob.problemId)) {
+    const key = problemKey(prob?.problemId ?? prob?.id);
+    if (key && !this.encounteredProblems.some(p => problemKey(p.problemId) === key)) {
       this.encounteredProblems.push({
-        problemId: prob.problemId,
+        problemId: prob.problemId ?? prob.id,
         problemType: prob.problemType,
-        body: prob.body || `题目ID: ${prob.problemId}`,
+        body: prob.body || `题目ID: ${prob.problemId ?? prob.id}`,
         options: prob.options || [],
         blanks: prob.blanks || [],
         answers: prob.answers || [],
@@ -42,7 +70,6 @@ export const repo = {
       });
     }
   },
-
   // === 自动进入课堂所需的多“线程”（多课堂）状态 ===
   listeningLessons: new Set(),      // lessonId 的集合，表示已经建立WS监听
   lessonTokens: new Map(),          // lessonId -> lessonToken（/lesson/checkin 返回）

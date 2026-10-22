@@ -5,6 +5,7 @@ import { actions } from '../../state/actions.js';
 import { ensureHtml2Canvas, ensureJsPDF } from '../../core/env.js';
 import { captureSlideImage } from '../../capture/screenshoot.js';
 import { queryOCRVision, queryTranslationText } from '../../ai/openai.js';
+import { getVisibleSlides } from '../presentation-slides.js';
 
 let mounted = false;
 let host;
@@ -876,16 +877,29 @@ export function updatePresentationList() {
     slidesWrap.className = 'slide-thumb-list';
 
     const showAll = !!ui.config.showAllSlides;
-    const slides = (presentation.slides || []);
-    const slidesToShow = showAll ? slides : slides.filter(s => s.problem);
+    const slides = Array.isArray(presentation.slides) ? presentation.slides : [];
+    const problemSlideCount = slides.filter(s => s?.problem).length;
+    const slidesToShow = getVisibleSlides(slides, {
+      showAllSlides: showAll,
+      currentSlideId: repo.currentSlideId,
+    });
 
     const currentIdStr = repo.currentSlideId != null ? String(repo.currentSlideId) : null;
     L('渲染课件缩略图', {
       presId: String(presentation.id),
       slidesTotal: slides.length,
+      problemSlideCount,
       slidesShown: slidesToShow.length,
+      fellBackToAll: !showAll && slides.length > 0 && problemSlideCount === 0,
       currentSlideId: currentIdStr
     });
+
+    if (slidesToShow.length === 0) {
+      const emptyEl = document.createElement('p');
+      emptyEl.className = 'no-presentations';
+      emptyEl.textContent = slides.length === 0 ? '该课件暂无页面数据' : '当前筛选下没有可显示页面';
+      slidesWrap.appendChild(emptyEl);
+    }
 
     for (const s of slidesToShow) {
       const presIdStr = String(presentation.id);
@@ -952,22 +966,39 @@ export function updatePresentationList() {
         actions.navigateTo(presIdStr, slideIdStr);
       });
 
+      const imageUrl = getSlideImageUrl(s);
+      const pageNumber = s.index ?? s.page ?? '';
       const img = document.createElement('img');
       if (presentation.width && presentation.height) {
         img.style.aspectRatio = `${presentation.width}/${presentation.height}`;
       }
-      img.src = s.thumbnail || '';
-      img.alt = s.title || `第 ${s.page ?? ''} 页`;
-      img.onerror = function () {
-        W('缩略图加载失败，移除该项', { slideIdStr, src: img.src });
-        if (thumb.parentNode) thumb.parentNode.removeChild(thumb);
+      img.alt = s.title || `第 ${pageNumber} 页`;
+
+      const placeholder = document.createElement('div');
+      placeholder.className = 'slide-thumb-placeholder';
+      const showPlaceholder = (message) => {
+        if (img.parentNode) img.remove();
+        placeholder.textContent = message;
+        if (!placeholder.parentNode) thumb.appendChild(placeholder);
       };
+
+      if (imageUrl) {
+        img.src = imageUrl;
+        img.decoding = 'async';
+        img.onerror = function () {
+          W('缩略图加载失败，保留占位项', { slideIdStr, src: img.src });
+          showPlaceholder(`第 ${pageNumber || '?'} 页\n缩略图加载失败`);
+        };
+        thumb.appendChild(img);
+      } else {
+        W('缩略图地址为空，使用占位项', { slideIdStr });
+        showPlaceholder(`第 ${pageNumber || '?'} 页\n暂无缩略图`);
+      }
 
       const idx = document.createElement('span');
       idx.className = 'slide-index';
-      idx.textContent = s.index ?? '';
+      idx.textContent = pageNumber;
 
-      thumb.appendChild(img);
       thumb.appendChild(idx);
       slidesWrap.appendChild(thumb);
     }
@@ -1090,8 +1121,10 @@ async function downloadPresentationPDF() {
     return ui.toast('未找到该课件的页面');
   }
 
-  const showAll = !!ui.config.showAllSlides;
-  const slides = pres.slides.filter(s => showAll || s.problem);
+  const slides = getVisibleSlides(pres.slides, {
+    showAllSlides: !!ui.config.showAllSlides,
+    currentSlideId: repo.currentSlideId,
+  });
   if (slides.length === 0) return ui.toast('当前筛选下没有可导出的页面');
 
   try {
