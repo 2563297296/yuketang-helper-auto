@@ -368,11 +368,15 @@ export function mountSettingsPanel() {
   if ($btnTest) {
     $btnTest.addEventListener('click', () => {
       const mockProblem = {
-        problemId: 'TEST-001',
-        body: '【测试题】这是一个测试提醒',
+        problemId: 'TEST-NOTIFICATION-ONLY',
+        body: '这是测试通知，不是真实课堂习题。',
         options: [],
       };
-      ui.notifyProblem(mockProblem, { thumbnail: null });
+      ui.notifyProblem(mockProblem, { thumbnail: null }, {
+        title: '测试通知（不是真实题目）',
+        nativeTitle: '雨课堂助手测试通知',
+        detail: '这是“测试习题提醒”按钮发出的测试通知，不是课堂新题。',
+      });
     });
   }
 
