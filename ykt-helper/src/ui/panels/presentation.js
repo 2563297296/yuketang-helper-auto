@@ -6,10 +6,19 @@ import { ensureHtml2Canvas, ensureJsPDF } from '../../core/env.js';
 import { captureSlideImage } from '../../capture/screenshoot.js';
 import { queryOCRVision, queryTranslationText } from '../../ai/openai.js';
 import { getVisibleSlides } from '../presentation-slides.js';
+import {
+  collectCoursewareImageUrls,
+  createStaticPageKey,
+  isStaticCoursewareDocument,
+  isStaticPresentationId,
+} from '../static-courseware.js';
 
 let mounted = false;
 let host;
-let staticReportReady = false; //已结束课程
+let staticCoursewareObserver = null;
+let staticCoursewareScanTimer = null;
+let staticCoursewareSignature = '';
+const staticObservedDocuments = new WeakSet();
 const selectedSlideIds = new Set();
 const ocrResults = new Map();
 const translationResults = new Map();
@@ -530,10 +539,6 @@ async function translateCurrentOCRText() {
   }
 }
 
-function isStudentLessonReportPage() {
-  return /\/v2\/web\/student-lesson-report\//.test(window.location.pathname);
-}
-
 function extractCoverIndex(url) {
   try {
     const m = decodeURIComponent(url).match(/cover(\d+)[_.]/i);
@@ -542,144 +547,154 @@ function extractCoverIndex(url) {
   return null;
 }
 
-function getSlidesDocument() {
-  if (document.querySelector('#content-page-wrap')) {
-    return document;
-  }
-  for (let i = 0; i < window.frames.length; i++) {
+function getStaticCoursewareDocument() {
+  if (isStaticCoursewareDocument(document)) return document;
+
+  let frames = [];
+  try {
+    frames = Array.from(window.frames || []);
+  } catch {}
+
+  for (const frame of frames) {
     try {
-      const d = window.frames[i].document;
-      if (d && d.querySelector('#content-page-wrap')) {
-        console.log('[雨课堂助手][DBG][presentation][static-report] 在子 frame 中找到了 content-page-wrap');
-        return d;
-      }
-    } catch (e) {
-    }
+      const frameDocument = frame?.document;
+      if (isStaticCoursewareDocument(frameDocument)) return frameDocument;
+    } catch {}
   }
-
-  console.log('[雨课堂助手][DBG][presentation][static-report] 所有 frame 中都没有 content-page-wrap，退回顶层 document');
-  return document;
+  return null;
 }
 
-function debugCheckSingleSlideImg() {
-  const selector = "#content-page-wrap > div > aside > div.left-panel-scroll > div.left-panel-tab-content > div > section.slides-list > div.slide-item.f13.active-slide-item > div > img";
-  const doc = getSlidesDocument();
-  const img = doc.querySelector(selector);
-  console.log('[雨课堂助手][DBG][presentation][static-report][debugCheck]', {
-    href: window.location.href,
-    hasContentPageWrap: !!document.querySelector('#content-page-wrap'),
-    imgFound: !!img,
-    selector
-  });
-  if (img) {
-    console.log('[雨课堂助手][DBG][presentation][static-report][debugCheck] img.outerHTML =', img.outerHTML);
-    console.log('[雨课堂助手][DBG][presentation][static-report][debugCheck] img.src =', img.currentSrc || img.src || img.getAttribute('src'));
+function getStaticCoursewareTitle(doc) {
+  const selectors = '.lesson-title, .title, h1, .header-title';
+  for (const candidate of [doc, document]) {
+    try {
+      const text = candidate?.querySelector(selectors)?.textContent?.trim();
+      if (text) return text;
+    } catch {}
   }
-  return img;
+  return '静态课件';
 }
 
-function collectStaticSlideURLsFromDom() {
-  const urls = new Set();
+function ensureStaticCoursewarePresentation() {
+  const doc = getStaticCoursewareDocument();
+  if (!doc) return { changed: false, pid: null, urls: [] };
 
-  // 先跑一遍最精确的 path 来看看当前 frame 到底有没有这张图
-  const debugImg = debugCheckSingleSlideImg();
-  if (debugImg) {
-    const src = debugImg.currentSrc || debugImg.src || debugImg.getAttribute('src') || '';
-    if (src &&
-        /thu-private-qn\.yuketang\.cn\/slide\/\d+\//.test(src) &&
-        /\.(png|jpg|jpeg|webp)(\?|#|$)/i.test(src)) {
-      urls.add(src);
-    }
+  const urls = collectCoursewareImageUrls(doc);
+  if (urls.length === 0) return { changed: false, pid: null, urls: [] };
+
+  const pageKey = createStaticPageKey(window.location);
+  const pid = `static:${pageKey}`;
+  const signature = `${pid}|${urls.join(',')}`;
+  if (signature === staticCoursewareSignature && repo.presentations.has(pid)) {
+    return { changed: false, pid, urls };
   }
 
-  const doc = getSlidesDocument();
-  const candidates = doc.querySelectorAll(
-    'section.slides-list img, .slides-list img,' +
-    'div.slide-item img,' +
-    'img[alt="cover"]'
-  );
+  const withIndex = urls.map((url, position) => ({
+    url,
+    position,
+    index: extractCoverIndex(url) ?? (position + 1),
+  }));
+  withIndex.sort((a, b) => a.index - b.index || a.position - b.position);
 
-  console.log('[雨课堂助手][DBG][presentation][static-report] DOM 候选 img 数量 =', candidates.length);
-
-  candidates.forEach((img, idx) => {
-    const src = img.currentSrc || img.src || img.getAttribute('src') || '';
-
-    console.log('[雨课堂助手][DBG][presentation][static-report] 检查 img#' + idx, {
-      className: img.className,
-      outerHTML: img.outerHTML.slice(0, 200) + (img.outerHTML.length > 200 ? '…' : ''),
-      src
-    });
-
-    if (!src) return;
-
-    if (/thu-private-qn\.yuketang\.cn\/slide\/\d+\//.test(src) &&
-        /\.(png|jpg|jpeg|webp)(\?|#|$)/i.test(src)) {
-      urls.add(src);
-    }
+  const usedIds = new Set();
+  const slides = withIndex.map(({ url, position, index }, slidePosition) => {
+    let idSuffix = String(index);
+    if (usedIds.has(idSuffix)) idSuffix = `${index}-${slidePosition + 1}`;
+    usedIds.add(idSuffix);
+    const id = `static:${pageKey}:${idSuffix}`;
+    return {
+      id,
+      index,
+      title: `第 ${index} 页`,
+      thumbnail: url,
+      image: url,
+      problem: null,
+      staticPageKey: pageKey,
+      staticPosition: position,
+    };
   });
 
-  const arr = [...urls];
-  console.log('[雨课堂助手][DBG][presentation][static-report] DOM 收集到 slide URL：', arr);
-  return arr;
-}
-
-
-function ensureStaticReportPresentation() {
-  if (!isStudentLessonReportPage()) return false;
-
-  const pid = `static:${window.location.pathname}`;
-
-  // 如果已经注入过，就不再重复扫描 & 打印日志，直接返回 false
-  if (staticReportReady && repo.presentations.has(pid)) {
-    return false;
-  }
-
-  const urlsFromDom = collectStaticSlideURLsFromDom();
-  const urls = Array.from(new Set([...urlsFromDom]));
-
-  if (!urls.length) {
-    console.log('[雨课堂助手][DBG][presentation][static-report] 依然没有发现任何 slide URL');
-    return false;
-  }
-
-  const withIndex = urls.map((u, i) => ({ u, idx: extractCoverIndex(u) ?? (i + 1) }));
-  withIndex.sort((a, b) => a.idx - b.idx);
-
-  const slides = withIndex.map(({ u, idx }) => {
-    const id = `static-${idx}`;
-    return { id, index: idx, title: `第 ${idx} 页`, thumbnail: u, image: u, problem: null };
-  });
-
-  const titleFromPage =
-    document.querySelector('.lesson-title, .title, h1, .header-title')?.textContent?.trim() ||
-    '静态课件（报告页）';
-
-  const presentation = { id: pid, title: titleFromPage, slides };
+  const presentation = {
+    id: pid,
+    title: getStaticCoursewareTitle(doc),
+    slides,
+    staticPageKey: pageKey,
+  };
   const existed = repo.presentations.has(pid);
   repo.presentations.set(pid, presentation);
 
-  let filled = 0;
-  for (const s of slides) {
-    const sid = String(s.id);
-    if (!repo.slides.has(sid)) {
-      repo.slides.set(sid, s);
-      filled++;
+  for (const slide of slides) repo.upsertSlide(slide);
+
+  const currentPresentationId = repo.currentPresentationId == null
+    ? ''
+    : String(repo.currentPresentationId);
+  const currentSlideId = repo.currentSlideId == null ? '' : String(repo.currentSlideId);
+  const canReplacePresentation = !currentPresentationId || isStaticPresentationId(currentPresentationId);
+  if (canReplacePresentation) repo.currentPresentationId = pid;
+
+  if (canReplacePresentation) {
+    const selectedSlideStillExists = slides.some((slide) => slide.id === currentSlideId);
+    if (!currentSlideId || (isStaticPresentationId(currentSlideId) && !selectedSlideStillExists)) {
+      repo.currentSlideId = slides[0].id;
     }
   }
-  if (!repo.currentPresentationId) repo.currentPresentationId = pid;
 
-  staticReportReady = true; // ★ 标记为已完成
-
-  console.log('[雨课堂助手][DBG][presentation][static-report] 已注入/更新 presentation', {
+  staticCoursewareSignature = signature;
+  L('[static-courseware] 已注入/更新课件', {
     pid,
     title: presentation.title,
     slideCount: slides.length,
-    newSlidesFilled: filled,
     existed,
-    sample: slides.slice(0, 3).map(s => s.image)
   });
+  return { changed: true, pid, urls };
+}
 
-  return true;
+function observeStaticCoursewareDocuments() {
+  if (!staticCoursewareObserver) return;
+
+  const documents = [document];
+  try {
+    for (const frame of Array.from(window.frames || [])) {
+      try {
+        if (frame?.document) documents.push(frame.document);
+      } catch {}
+    }
+  } catch {}
+
+  for (const doc of documents) {
+    try {
+      if (!doc?.documentElement || staticObservedDocuments.has(doc)) continue;
+      staticCoursewareObserver.observe(doc.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['src', 'currentSrc', 'data-src', 'data-original', 'data-lazy-src', 'data-url'],
+      });
+      staticObservedDocuments.add(doc);
+    } catch {}
+  }
+}
+
+function scheduleStaticCoursewareScan() {
+  observeStaticCoursewareDocuments();
+  if (staticCoursewareScanTimer) return;
+  staticCoursewareScanTimer = window.setTimeout(() => {
+    staticCoursewareScanTimer = null;
+    try {
+      const result = ensureStaticCoursewarePresentation();
+      observeStaticCoursewareDocuments();
+      if (result.changed) updatePresentationList();
+    } catch (e) {
+      W('[static-courseware] DOM 扫描失败：', e);
+    }
+  }, 250);
+}
+
+function installStaticCoursewareObserver() {
+  if (!staticCoursewareObserver && typeof MutationObserver !== 'undefined') {
+    staticCoursewareObserver = new MutationObserver(() => scheduleStaticCoursewareScan());
+  }
+  observeStaticCoursewareDocuments();
 }
 
 
@@ -756,6 +771,7 @@ export function mountPresentationPanel() {
   renderOCRState();
   renderTranslationState();
   L('mountPresentationPanel 完成');
+  updatePresentationList();
   return host;
 }
 
@@ -773,40 +789,11 @@ export function showPresentationPanel(visible = true) {
 export function updatePresentationList() {
   mountPresentationPanel();
 
+  installStaticCoursewareObserver();
   try {
-    if (isStudentLessonReportPage()) {
-      ensureStaticReportPresentation();
-    }
+    ensureStaticCoursewarePresentation();
   } catch (e) {
-    W('[static-report] 检测/注入失败：', e);
-  }
-
-  if (!window.__ykt_static_dom_mo) {
-    window.__ykt_static_dom_mo = true;
-    let times = 0;
-
-    const mo = new MutationObserver(() => {
-      if (!isStudentLessonReportPage()) return;
-      if (++times > 20) return; 
-
-      console.log('[雨课堂助手][DBG][presentation][static-report] DOM 变更，尝试重新收集 slide URL (times =', times, ')');
-      const injected = ensureStaticReportPresentation();
-      if (injected) {
-        console.log('[雨课堂助手][DBG][presentation][static-report] DOM 中已找到 slide，停止监听并刷新面板');
-        try { mo.disconnect(); } catch (e) {}
-        updatePresentationList();
-      }
-    });
-
-    const rootSelector = "#content-page-wrap > div > aside > div.left-panel-scroll > div.left-panel-tab-content > div > section.slides-list";
-    let target = document.querySelector(rootSelector) || document.querySelector('section.slides-list') || document.body;
-
-    console.log('[雨课堂助手][DBG][presentation][static-report] MutationObserver 监听目标：', {
-      useBody: target === document.body,
-      hasSlidesList: target !== document.body
-    });
-
-    mo.observe(target, { childList: true, subtree: true });
+    W('[static-courseware] 检测/注入失败：', e);
   }
 
   const listEl = document.getElementById('ykt-presentation-list');

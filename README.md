@@ -57,7 +57,7 @@ npm start
 
 |文件夹|适用平台|状态|
 |---|---|---|
-|`ykt-helper`|Edge/Chrome 浏览器|`1.21.5` 正在更新|
+|`ykt-helper`|Edge/Chrome 浏览器|`1.21.4` 当前发布|
 |`ykt-helper-win`|Windows/macOS 独立客户端|`2.0.0-preview`正在更新|
 |`ykt-helper-android`|Android 移动端|正在开发|
 

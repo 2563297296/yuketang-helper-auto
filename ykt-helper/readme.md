@@ -1,6 +1,6 @@
 # ykt-helper 开发文档
 
-> 当前发布版本为 1.21.3，正式用户脚本位于 [`../release/ykt-helper-1213.user.js`](../release/ykt-helper-1213.user.js)。`flat/` 是旧版扁平化实现，不参与当前发布。
+> 当前发布版本为 1.21.4，正式用户脚本位于 [`../release/ykt-helper-1214.user.js`](../release/ykt-helper-1214.user.js)。`flat/` 是旧版扁平化实现，不参与当前发布。
 
 ## 项目构建
 
@@ -17,7 +17,7 @@ npm run dev          # 开发模式（监听文件变化）
 ```
 
 ### 使用方式
-构建后的当前产物是 `dist/ykt-helper-1213.user.js`；发布前将它与根目录的 `../release/ykt-helper-1213.user.js` 保持完全一致，再导入 Tampermonkey。不要保留 1214–1216 的独立发布包，本轮所有改动归并到 1.21.3。
+构建后的当前产物是 `dist/ykt-helper-1214.user.js`；发布前将它与根目录的 `../release/ykt-helper-1214.user.js` 保持完全一致，再导入 Tampermonkey。不要额外创建后续版本的独立发布包；本轮所有改动归并到 1.21.4。
 
 ### 本地调试
 `debug/` 目录提供了本地雨课堂测试宿主，可用于 userscript、浏览器扩展和 Electron/WebView 的基础功能测试。

@@ -1,5 +1,7 @@
 import { repo } from '../state/repo.js';
-import { actions } from '../state/actions.js';
+import { harvestProblemsFromPayload } from '../state/problem-harvest.js';
+
+const HISTORICAL_REPORT_PATH_RE = /^\/api\/v3\/classroom-report\/(?:lesson\/basic-info|student\/(?:lesson-info|detail|review|ppt)|replay)\/?$/;
 
 (function interceptFetch() {
   if (window.__YKT_FETCH_PATCHED__) return;
@@ -17,36 +19,44 @@ import { actions } from '../state/actions.js';
 
     const resp = await rawFetch.apply(this, args);
 
+    let pathname = '';
     try {
-      // === (2) 只拦截 Rain Classroom 的 JSON 接口 ===
-      if (
-        url.includes('/lesson') ||
-        url.includes('/presentation') ||
-        url.includes('/slides') ||
-        url.includes('/problem')
-      ) {
-        const cloned = resp.clone();
-        const text = await cloned.text();
-        // 这里不能直接 resp.json()，否则流会被消费；必须 clone()
-        const json = JSON.parse(text);
+      pathname = new URL(url, location.href).pathname;
+    } catch {}
+    const isHistoricalReport = HISTORICAL_REPORT_PATH_RE.test(pathname);
+    const isRelevantResponse = isHistoricalReport || (
+      url.includes('/lesson') ||
+      url.includes('/presentation') ||
+      url.includes('/slides') ||
+      url.includes('/problem')
+    );
 
-        // === (3) 关键：提取 slides 并灌入 repo.slides ===
-        if (json && json.data && json.data.slides) {
-          const slides = json.data.slides;
-          let filled = 0;
-          for (const s of slides) {
-            const sid = String(s.id);
-            if (!repo.slides.has(sid)) {
-              repo.slides.set(sid, s);
-              filled++;
-            }
-          }
-          console.log(`雨课堂助手][INFO][fetch-interceptor] 已填充 slides ${filled}/${slides.length}`);
-        }
+    if (!resp.ok || !isRelevantResponse) return resp;
+
+    try {
+      const cloned = resp.clone();
+      const text = await cloned.text();
+      // Do not consume the original response stream.
+      const json = JSON.parse(text);
+
+      if (isHistoricalReport) {
+        harvestProblemsFromPayload(json, repo);
       }
-    } catch (e) {
-      console.warn('[雨课堂助手][ERR][fetch-interceptor] 解析响应失败:', e);
-    }
+
+      // Keep the existing live-course slide cache behavior.
+      if (json && json.data && Array.isArray(json.data.slides)) {
+        const slides = json.data.slides;
+        let filled = 0;
+        for (const s of slides) {
+          const sid = String(s.id);
+          if (!repo.slides.has(sid)) {
+            repo.slides.set(sid, s);
+            filled++;
+          }
+        }
+        console.log(`雨课堂助手][INFO][fetch-interceptor] 已填充 slides ${filled}/${slides.length}`);
+      }
+    } catch {}
 
     return resp; // 一定要返回原始 Response
   };

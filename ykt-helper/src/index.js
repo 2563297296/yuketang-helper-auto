@@ -18,60 +18,6 @@ function loadFA() {
   document.head.appendChild(link);
 }
 
-function maybeAutoReloadOnMount() {
-  try {
-    // If the script is mounted after DOM is already ready, reload once so XHR/WS interceptors can arm early.
-    // Guarded by sessionStorage to avoid infinite reload loops.
-    const key = '__ykt_helper_auto_reload_once__';
-    if (document.readyState === 'loading') return false;
-    if (!window.sessionStorage) return false;
-    if (window.sessionStorage.getItem(key) === '1') return false;
-
-    window.sessionStorage.setItem(key, '1');
-    console.log('[YKT-Helper][INFO] Late mount detected; reloading once to arm interceptors.');
-    window.setTimeout(() => window.location.reload(), 50);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function startPeriodicReload(opts = {}) {
-  try {
-    const intervalMs = Number.isFinite(opts.intervalMs) ? opts.intervalMs : 5 * 60 * 1000;
-    const onlyWhenHidden = (opts.onlyWhenHidden !== false);
-    const skipLessonPages = (opts.skipLessonPages !== false);
-
-    if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
-
-      window.setInterval(() => {
-    try {
-      console.log('[雨课堂助手]][DEBUG] periodic tick', {
-        pathname: window.location.pathname,
-        hidden: document.hidden
-      });
-
-      if (getRuntimeMode(window.location.pathname) === 'mobile-reminder') {
-        console.log('[雨课堂助手][DEBUG] skip reload: mobile reminder mode');
-        return;
-      }
-      if (skipLessonPages && /\/lesson\//.test(window.location.pathname)) {
-        console.log('[雨课堂助手][DEBUG] skip reload: lesson page');
-        return;
-      }
-      if (onlyWhenHidden && !document.hidden) {
-        console.log('[雨课堂助手][DEBUG] skip reload: page visible');
-        return;
-      }
-
-      console.log('[雨课堂助手][INFO] Periodic reload triggered to avoid zombie session.');
-      window.location.reload();
-    } catch (e) {
-      console.error(e);
-    }
-  }, intervalMs);
-  } catch {}
-}
-
 let desktopStarted = false;
 let mobileReminderStarted = false;
 let runtimeBootQueued = false;
@@ -79,9 +25,6 @@ let runtimeBootQueued = false;
 function startDesktopRuntime() {
   if (desktopStarted) return;
   desktopStarted = true;
-  if (maybeAutoReloadOnMount()) return;
-
-  startPeriodicReload({ intervalMs: 1 * 60 * 1000, onlyWhenHidden: false, skipLessonPages: true });
   loadFA();
   injectStyles();
   ui._mountAll?.();

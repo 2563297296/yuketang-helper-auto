@@ -1,6 +1,10 @@
 // src/net/xhr-interceptor.js
 import { gm } from '../core/env.js';
 import { actions } from '../state/actions.js';
+import { repo } from '../state/repo.js';
+import { harvestProblemsFromPayload } from '../state/problem-harvest.js';
+
+const HISTORICAL_REPORT_PATH_RE = /^\/api\/v3\/classroom-report\/(?:lesson\/basic-info|student\/(?:lesson-info|detail|review|ppt)|replay)\/?$/;
 
 export function installXHRInterceptor() {
   class MyXHR extends XMLHttpRequest {
@@ -16,7 +20,13 @@ export function installXHRInterceptor() {
       const rawSend = this.send;
       this.send = (body) => { payload = body; return rawSend.call(this, body); };
       this.addEventListener('load', () => {
-        try { cb(JSON.parse(this.responseText), payload); } catch {}
+        try {
+          cb(JSON.parse(this.responseText), payload, {
+            xhr: this,
+            status: this.status,
+            ok: this.status >= 200 && this.status < 300,
+          });
+        } catch {}
       });
     }
   }
@@ -34,16 +44,28 @@ export function installXHRInterceptor() {
     const pathname = url.pathname || '';
     console.log('[雨课堂助手][INFO] XHR请求:', method, pathname, url.search);
 
+    // Historical report payloads are read-only for the helper: harvest and
+    // display problems, but never enter the live notification/answer path.
+    if (HISTORICAL_REPORT_PATH_RE.test(pathname)) {
+      xhr.intercept((resp, _payload, meta) => {
+        if (!meta?.ok) return;
+        if (resp && (resp.code === 0 || resp.success === true)) {
+          harvestProblemsFromPayload(resp, repo);
+        }
+      });
+      return;
+    }
+
     // 课件：精确路径或包含关键字
     if (
       pathname === '/api/v3/lesson/presentation/fetch' ||
       (pathname.includes('presentation') && pathname.includes('fetch'))
     ) {
       console.log('[雨课堂助手][INFO] 拦截课件请求');
-      xhr.intercept((resp) => {
+      xhr.intercept((resp, _payload, meta) => {
         const id = url.searchParams.get('presentation_id');
         console.log('[雨课堂助手][INFO] 课件响应:', resp);
-        if (resp && (resp.code === 0 || resp.success)) {
+        if (meta?.ok && resp && (resp.code === 0 || resp.success)) {
           actions.onPresentationLoaded(id, resp.data || resp.result);
         }
       });

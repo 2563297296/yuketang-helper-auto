@@ -6,6 +6,46 @@ function problemKey(value) {
   return key || null;
 }
 
+function isMeaningfulValue(value) {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'string') return value.trim() !== '';
+  if (Array.isArray(value)) return value.length > 0;
+  if (value instanceof Date) return true;
+  if (typeof value === 'object') return Object.keys(value).length > 0;
+  return true;
+}
+
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function mergeSparseObject(base, patch) {
+  const result = isPlainObject(base) ? { ...base } : {};
+  if (!isPlainObject(patch)) return result;
+
+  for (const [key, value] of Object.entries(patch)) {
+    if (!isMeaningfulValue(value)) continue;
+    const current = result[key];
+
+    if (key === 'status' && isPlainObject(current) && isPlainObject(value)) {
+      const status = { ...current };
+      for (const [statusKey, statusValue] of Object.entries(value)) {
+        if (isMeaningfulValue(statusValue)) status[statusKey] = statusValue;
+      }
+      result[key] = status;
+      continue;
+    }
+
+    if (isPlainObject(current) && isPlainObject(value)) {
+      result[key] = mergeSparseObject(current, value);
+    } else {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
 export const repo = {
   presentations: new Map(), // id -> presentation
   slides: new Map(),        // slideId -> slide
@@ -40,8 +80,9 @@ export const repo = {
   upsertProblem(prob) {
     const key = problemKey(prob?.problemId ?? prob?.id);
     if (!key) return false;
-    const normalized = prob.problemId == null ? { ...prob, problemId: key } : prob;
-    this.problems.set(key, normalized);
+    const normalized = { ...prob, problemId: key };
+    const current = this.problems.get(key);
+    this.problems.set(key, current ? mergeSparseObject(current, normalized) : normalized);
     return true;
   },
   getSlide(id) { return this.slides.get(problemKey(id)); },
@@ -58,17 +99,32 @@ export const repo = {
 
   pushEncounteredProblem(prob, slide, presentationId) {
     const key = problemKey(prob?.problemId ?? prob?.id);
-    if (key && !this.encounteredProblems.some(p => problemKey(p.problemId) === key)) {
-      this.encounteredProblems.push({
-        problemId: prob.problemId ?? prob.id,
-        problemType: prob.problemType,
-        body: prob.body || `题目ID: ${prob.problemId ?? prob.id}`,
-        options: prob.options || [],
-        blanks: prob.blanks || [],
-        answers: prob.answers || [],
-        slide, presentationId,
-      });
+    if (!key) return false;
+
+    const incoming = {
+      problemId: key,
+      problemType: prob.problemType,
+      body: prob.body,
+      options: prob.options,
+      blanks: prob.blanks,
+      answers: prob.answers,
+      slide,
+      presentationId,
+    };
+    const existing = this.encounteredProblems.find(p => problemKey(p.problemId) === key);
+    if (existing) {
+      Object.assign(existing, mergeSparseObject(existing, incoming));
+      return false;
     }
+
+    this.encounteredProblems.push({
+      ...incoming,
+      body: incoming.body || `题目ID: ${key}`,
+      options: incoming.options || [],
+      blanks: incoming.blanks || [],
+      answers: incoming.answers || [],
+    });
+    return true;
   },
   // === 自动进入课堂所需的多“线程”（多课堂）状态 ===
   listeningLessons: new Set(),      // lessonId 的集合，表示已经建立WS监听

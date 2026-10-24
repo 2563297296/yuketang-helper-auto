@@ -6,6 +6,7 @@ import { captureSlideImage } from '../../capture/screenshoot.js';
 import { parseAIAnswer } from '../../tsm/ai-format.js';
 import { hasActiveAIProfile} from '../../state/actions.js'
 import { getCurrentMainPageSlideId, waitForVueReady, watchMainPageChange } from '../../core/vuex-helper.js';
+import { pickStaticFallbackSlide } from '../static-courseware.js';
 
 const L = (...a) => console.log('[雨课堂助手][DBG][ai]', ...a);
 const W = (...a) => console.warn('[雨课堂助手][WARN][ai]', ...a);
@@ -229,6 +230,30 @@ function fallbackSlideIdFromRecent() {
     }
   } catch (e) { W('fallbackSlideIdFromRecent error:', e); }
   return null;
+}
+
+function resolveStaticCoursewareSlide() {
+  try {
+    ui.updatePresentationList();
+  } catch (e) {
+    W('静态课件扫描失败:', e);
+  }
+
+  const picked = pickStaticFallbackSlide(repo.presentations, {
+    currentPresentationId: repo.currentPresentationId,
+    currentSlideId: repo.currentSlideId,
+  });
+  if (!picked) return null;
+
+  const slideId = asIdStr(picked.slide?.id);
+  if (!slideId) return null;
+
+  repo.upsertSlide({ ...picked.slide, id: slideId });
+  return {
+    presentation: picked.presentation,
+    slide: repo.getSlide(slideId),
+    slideId,
+  };
 }
 function $(sel) { return document.querySelector(sel); }
 
@@ -463,6 +488,19 @@ function renderQuestion() {
     }
   }
 
+  if (!slide) {
+    const picked = resolveStaticCoursewareSlide();
+    if (picked?.slide) {
+      slide = picked.slide;
+      displayText = `静态课件：${slide.title || `第 ${slide.page || slide.index || ''} 页`}`;
+      selectionSource = '静态课件（兜底）';
+      hasPageSelected = true;
+    } else if (!displayText) {
+      displayText = '未检测到当前页面\n💡 请打开课件页面后再试。';
+      selectionSource = '无';
+    }
+  }
+
   const el = document.querySelector('#ykt-ai-question-display');
   if (el) el.textContent = displayText;
 
@@ -538,6 +576,17 @@ export async function askAIFusionMode() {
         slide = look.slide;
         selectionSource = selectionSource || `最近题目（兜底/${look.hit}键命中）`;
         L('[ask] Fallback 使用 最近题目 slideId:', { currentSlideId, lookupHit: look.hit, hasSlide: !!slide });
+      }
+    }
+
+    if (!currentSlideId || !slide) {
+      const picked = resolveStaticCoursewareSlide();
+      if (picked?.slide) {
+        currentSlideId = picked.slideId;
+        slide = picked.slide;
+        forcedImageUrl = null;
+        selectionSource = '静态课件（兜底）';
+        L('[ask] 使用静态课件兜底:', { currentSlideId, presentationId: picked.presentation?.id });
       }
     }
 

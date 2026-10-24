@@ -350,6 +350,7 @@ export function mountProblemListPanel() {
 
   $('#ykt-problem-list-close')?.addEventListener('click', () => showProblemListPanel(false));
   window.addEventListener('ykt:open-problem-list', () => showProblemListPanel(true));
+  window.addEventListener('ykt:problems-updated', () => updateProblemList());
 
   mounted = true;
 
